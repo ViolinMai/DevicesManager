@@ -1,0 +1,31 @@
+[package]
+name = "DevicesManager"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "quinn_test"
+crate-type = ["cdylib"]
+
+[[bin]]
+name = "quic_server"
+path = "src/bin/server.rs"
+
+[[bin]]
+name = "connection_protocol"
+path = "src/connection_protocol.rs"
+
+[dependencies]
+quinn = { version = "0.11.12", default-features = false, features = [
+    "runtime-tokio",
+    "rustls-ring",
+] }
+rcgen = "0.14.10"
+jni = "0.22.4"
+rustls = { version = "0.23.45", features = ["ring"] }
+tokio = { version = "1.53.1", features = ["full"] }
+serde = { version = "1.0.229", features = ["derive"] }
+serde_json = "1.0.151"
+aes-gcm = "0.11.1"
+argon2 = "0.6.0"
+rand = "0.10.2"
