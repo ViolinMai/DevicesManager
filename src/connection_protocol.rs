@@ -71,8 +71,8 @@ async fn server(
     cert_chain: Vec<rustls::pki_types::CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
     json_bytes: Vec<u8>,
-    salt: Vec<u8>,
     nonce: Vec<u8>,
+    salt: Vec<u8>,
 ) {
     //(5)
     //here we configured the server config to the local cert we made and the key
@@ -194,7 +194,7 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     let connection = call.unwrap();
     println!("connected to the server!");
     receive_json_call(&connection).await;
-    let sending_choice = get_input("Do you want to send a file?");
+    let sending_choice = get_input("Do you want to send a file? (y/n)");
     if sending_choice.await.to_lowercase() == "y"{
         let file_path = get_input("Enter the file path: ").await;
         let clean_path = file_path.trim().trim_matches('"').to_string();
@@ -292,12 +292,41 @@ async fn handle_sending_json(mut send: quinn::SendStream, mut _recv: quinn::Recv
 }
 
 async fn receive_json_call(connection: &quinn::Connection){
+    // sending the json code to the server to request it
     let (mut send, mut recv) = connection.open_bi().await.unwrap();
     let code: u8 = 2;
     send.write_all(&[code]).await.unwrap();
     send.finish().unwrap();
-
-    recv.read_exact(buf);
+    //here we start to read the coming data
+    // first the json
+    let mut json_len_buffer = [0u8; 8];
+    recv.read_exact(&mut json_len_buffer).await.unwrap();
+    let json_len = u64::from_be_bytes(json_len_buffer) as usize;
+    let mut encrypted_json = vec![0u8; json_len];
+    recv.read_exact(&mut encrypted_json).await.unwrap();
+    //then the salt
+    let mut salt_len_buffer = [0u8; 8];
+    recv.read_exact(&mut salt_len_buffer).await.unwrap();
+    let salt_len = u64::from_be_bytes(salt_len_buffer) as usize;
+    let mut salt = vec![0u8; salt_len];
+    recv.read_exact(&mut salt).await.unwrap();
+    let mut nonce_len_buffer = [0u8; 8];
+    recv.read_exact(&mut nonce_len_buffer).await.unwrap();
+    let nonce_len = u64::from_be_bytes(nonce_len_buffer) as usize;
+    let mut nonce = vec![0u8; nonce_len];
+    recv.read_exact(&mut nonce).await.unwrap();
+    let pin = get_input("Enter the device pin: ").await;
+    match decrypt_json(&encrypted_json, &salt, &nonce, &pin){
+        Ok(f) => {
+            println!("dycrypted successfully.");
+            for file in &f.files{
+                println!("File name: {}, File size: {}, File path: {:?}, Is it a folder: {}", file.name, file.size, file.path, file.is_dir)
+            }
+        }
+        Err(e) => {
+            println!("an error happened while dycrypting: {}", e)
+        }
+    }
 }
 
 async fn send_file_call(connection: &quinn::Connection, file_path: &str) {
@@ -376,6 +405,34 @@ async fn encrypting_json(json_bytes: Vec<u8>) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
 
     println!("Encrypted successfully! Size: {} bytes", encrypted_bytes.len());
     return (encrypted_bytes, nonce_bytes.to_vec(), salt.to_vec());
+}
+
+fn decrypt_json(
+    encrypted_bytes: &[u8],
+    salt: &[u8],
+    nonce_bytes: &[u8],
+    pin: &String,
+) -> Result<DeviceIndex, Box<dyn std::error::Error>> {
+    // 1. إعادة اشتقاق نفس المفتاح باستخدام الـ PIN والـ Salt المستلمين
+    let mut key_bytes = [0u8; 32];
+    Argon2::default()
+        .hash_password_into(pin.as_bytes(), salt, &mut key_bytes)
+        .map_err(|e| format!("Key derivation failed: {}", e))?;
+
+    // 2. تهيئة الـ Cipher
+    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice())?;
+    let cipher = Aes256Gcm::new(&key);
+    let nonce = Nonce::try_from(nonce_bytes)?;
+
+    // 3. فك التشفير
+    let decrypted_bytes = cipher
+        .decrypt(&nonce, encrypted_bytes)
+        .map_err(|e| format!("Decryption failed (Wrong PIN or corrupted data): {}", e))?;
+
+    // 4. تحويل بايتات الـ JSON النظيفة إلى كائن DeviceIndex
+    let device_index: DeviceIndex = serde_json::from_slice(&decrypted_bytes)?;
+
+    Ok(device_index)
 }
 
 #[tokio::main]
