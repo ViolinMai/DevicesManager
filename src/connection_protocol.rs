@@ -70,6 +70,9 @@ async fn server(
     // this id the listner endpoint
     cert_chain: Vec<rustls::pki_types::CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
+    json_bytes: Vec<u8>,
+    salt: Vec<u8>,
+    nonce: Vec<u8>,
 ) {
     //(5)
     //here we configured the server config to the local cert we made and the key
@@ -94,6 +97,7 @@ async fn server(
                     match listen_socket.send_to(b"I AM THE SERVER", client_addr).await{
                         Ok(n) => {
                             println!("Sent {} bytes to {}", n, client_addr);
+                            
                         },
                         Err(e) => {
                             eprintln!("Failed to send data: {}", e);
@@ -113,10 +117,13 @@ async fn server(
     
     //(6-a)
     while let Some(incoming) = endpoint.accept().await {
+        let j = json_bytes.clone();
+        let s = salt.clone();
+        let n = nonce.clone();
         tokio::spawn(async move {
             let call = incoming.await.unwrap();
             loop {
-                let (mut send, mut recv) = match call.accept_bi().await {
+                let (send, mut recv) = match call.accept_bi().await {
                     Ok(stream) => stream,
                     Err(_) => break,
                 };
@@ -128,6 +135,15 @@ async fn server(
                     1 => {
                         tokio::spawn(async move {
                             handle_recieved_file(send, recv).await;
+                        });
+                    }
+                    2 => {
+                        let j_stream = j.clone();
+                        let s_stream = s.clone();
+                        let n_stream = n.clone();
+                        
+                        tokio::spawn(async move {
+                            handle_sending_json(send, recv, j_stream, s_stream, n_stream).await;
                         });
                     }
                     _ => {
@@ -177,6 +193,7 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
         .await;
     let connection = call.unwrap();
     println!("connected to the server!");
+    receive_json_call(&connection).await;
     let sending_choice = get_input("Do you want to send a file?");
     if sending_choice.await.to_lowercase() == "y"{
         let file_path = get_input("Enter the file path: ").await;
@@ -256,12 +273,31 @@ async fn handle_recieved_file(mut file_send: quinn::SendStream, mut file_recv: q
     }
 }
 
-async fn handle_recieved_message(mut send: quinn::SendStream, mut recv: quinn::RecvStream) {
+async fn _handle_recieved_message(mut send: quinn::SendStream, mut recv: quinn::RecvStream) {
     let data = recv.read_to_end(1024).await.unwrap();
     let message = String::from_utf8(data).unwrap();
     println!("You recevied: {}", message);
     send.write_all("READ".as_bytes()).await.unwrap();
     send.finish().unwrap();
+}
+
+async fn handle_sending_json(mut send: quinn::SendStream, mut _recv: quinn::RecvStream, json_bytes: Vec<u8>, salt: Vec<u8>, nonce: Vec<u8>) {
+    send.write_all(&(json_bytes.len() as u64).to_be_bytes()).await.unwrap();
+    send.write_all(&json_bytes).await.unwrap();
+    send.write_all(&(salt.len() as u64).to_be_bytes()).await.unwrap();
+    send.write_all(&salt).await.unwrap();
+    send.write_all(&(nonce.len() as u64).to_be_bytes()).await.unwrap();
+    send.write_all(&nonce).await.unwrap();
+    send.finish().unwrap();
+}
+
+async fn receive_json_call(connection: &quinn::Connection){
+    let (mut send, mut recv) = connection.open_bi().await.unwrap();
+    let code: u8 = 2;
+    send.write_all(&[code]).await.unwrap();
+    send.finish().unwrap();
+
+    recv.read_exact(buf);
 }
 
 async fn send_file_call(connection: &quinn::Connection, file_path: &str) {
@@ -284,7 +320,7 @@ async fn send_file_call(connection: &quinn::Connection, file_path: &str) {
     println!("The transfer speed is: {}MB/s", speed_mb_s);
 }
 
-async fn json_retriveing() {
+async fn json_retriveing() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     let mut all_files: Vec<FileIndexing> = Vec::new();
     match tokio::fs::read_dir(r"C:\Users\mmood\Documents\exe").await {
         Ok(mut entries) => {
@@ -299,15 +335,17 @@ async fn json_retriveing() {
             }
             let device = DeviceIndex { files: all_files };
             let json_bytes = serde_json::to_vec(&device).unwrap();
-            encrypting_json(json_bytes);
+            let (encrypted_json, salt, nonce) = encrypting_json(json_bytes).await;
+            return (encrypted_json, salt, nonce);
         }
         Err(e) => {
-            println!("couldn't read... {}", e)
+            println!("couldn't read... {}", e);
+            return (Vec::new(), Vec::new(), Vec::new());
         }
     };
 }
 
-async fn encrypting_json(json_bytes: Vec<u8>) {
+async fn encrypting_json(json_bytes: Vec<u8>) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
     // TO BE DELETED
     let pin = "1234";
     let mut key_bytes = [0u8; 32];
@@ -323,20 +361,21 @@ async fn encrypting_json(json_bytes: Vec<u8>) {
         .expect("Couldn't derive it.");
 
     // 3. تجهيز الـ Cipher
-    let key = Key::<Aes256Gcm>::from_slice(&key_bytes);
-    let cipher = Aes256Gcm::new(key);
+    let key = Key::<Aes256Gcm>::try_from(key_bytes.as_slice()).unwrap();
+    let cipher = Aes256Gcm::new(&key);
 
     // 4. توليد Nonce بطول 12 بايت
     let mut nonce_bytes = [0u8; 12];
     rand::rng().fill(&mut nonce_bytes);
-    let nonce = Nonce::from_slice(&nonce_bytes);
+    let nonce = Nonce::try_from(nonce_bytes.as_slice()).unwrap();
 
     // 5. التشفير
     let encrypted_bytes = cipher
-        .encrypt(nonce, json_bytes.as_ref())
+        .encrypt(&nonce, json_bytes.as_ref())
         .expect("couldn't encrypt it...");
 
     println!("Encrypted successfully! Size: {} bytes", encrypted_bytes.len());
+    return (encrypted_bytes, nonce_bytes.to_vec(), salt.to_vec());
 }
 
 #[tokio::main]
@@ -348,11 +387,15 @@ async fn main() {
         .expect("Failed to install default crypto provider");
     let (cert_chain, key) = make_cert_and_key().await;
     let clients_cert = cert_chain.clone();
+    
+    println!("making the file index...");
+    let (encrypted_json, salt, nonce) = json_retriveing().await;
+    
+    println!("Starting server...");
     //(4)
     //sending it to the server
-    println!("Starting server...");
     tokio::spawn(async move {
-        server(cert_chain.clone(), key).await;
+        server(cert_chain.clone(), key, encrypted_json, salt, nonce).await;
     });
     let response = get_input("Do you want to run the client? (y/n)").await;
     if response.to_lowercase() == "y"{
@@ -364,5 +407,5 @@ async fn main() {
     }
 
     
-    json_retriveing().await;
+    
 }
