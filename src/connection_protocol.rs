@@ -12,20 +12,22 @@ use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use std::vec;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::net::UdpSocket;
 
 // JSON STRUCT
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct FileIndexing {
+    id: usize,
     name: String,
     size: u64,
     path: std::path::PathBuf,
     is_dir: bool,
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 struct DeviceIndex {
     files: Vec<FileIndexing>,
 }
@@ -73,6 +75,7 @@ async fn server(
     json_bytes: Vec<u8>,
     nonce: Vec<u8>,
     salt: Vec<u8>,
+    device_index: DeviceIndex,
 ) {
     //(5)
     //here we configured the server config to the local cert we made and the key
@@ -83,6 +86,10 @@ async fn server(
 
     //here the server boots
     let endpoint = Endpoint::server(config, addr).unwrap();
+
+    // cloning the file index to pass it to the server
+    let dev_idx_stream = device_index.clone();
+
     // a while loop to listen
     //(5-b) we are opening a broadcast channel to listen for clients
     let listen_socket = tokio::net::UdpSocket::bind("0.0.0.0:8888").await
@@ -120,10 +127,11 @@ async fn server(
         let j = json_bytes.clone();
         let s = salt.clone();
         let n = nonce.clone();
+        let dev_idx_clone = dev_idx_stream.clone();
         tokio::spawn(async move {
             let call = incoming.await.unwrap();
             loop {
-                let (send, mut recv) = match call.accept_bi().await {
+                let (mut send, mut recv) = match call.accept_bi().await {
                     Ok(stream) => stream,
                     Err(_) => break,
                 };
@@ -146,6 +154,15 @@ async fn server(
                             handle_sending_json(send, recv, j_stream, s_stream, n_stream).await;
                         });
                     }
+                    3 => {
+                        let dev_idx = dev_idx_clone.clone();
+                        tokio::spawn(async move{
+                            let mut id = [0u8; 8];
+                            recv.read_exact(&mut id).await.unwrap();
+                            let target_id = u64::from_be_bytes(id) as usize;
+                            handle_sending_requested_file(dev_idx, send, recv, target_id).await;
+                        });
+                    }
                     _ => {
                         println!("Uknown code: {:?}", read_code_buf);
                     }
@@ -161,7 +178,7 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
 
     // here we took the cert and then stored it
     let mut store = rustls::RootCertStore::empty();
-    store.add(cert[0].clone());
+    store.add(cert[0].clone()).expect("an error happened while add certs.");
 
     // here we changed the client config so they can trust the cert we created
     // the without client auth means that it's a one way authintcation by the server
@@ -196,10 +213,27 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     receive_json_call(&connection).await;
     let sending_choice = get_input("Do you want to send a file? (y/n)");
     if sending_choice.await.to_lowercase() == "y"{
-        let file_path = get_input("Enter the file path: ").await;
-        let clean_path = file_path.trim().trim_matches('"').to_string();
-        println!("Sending file: {:?}", clean_path);
-        send_file_call(&connection, &clean_path).await;
+        let code: u8 = 3;
+
+        let mut handles = Vec::new();
+        let number_chosen = get_input("Enter the file/s number (split with a comma): ").await;
+        let ids: Vec<usize> = number_chosen.split(',').filter_map(|s| s.trim().parse::<usize>().ok()).collect();
+        for id in ids{
+            let con = connection.clone();
+            let handle = tokio::spawn(async move{
+                let (mut send, recv) = con.open_bi().await.expect("an error happened while opining a connection.");
+                send.write_all(&[code]).await.unwrap();
+                send.write_all(&(id as u64).to_be_bytes()).await.unwrap();
+                println!("Requesting file num: {:?}", id);
+                handle_recieved_file(send, recv).await;
+            });
+            handles.push(handle);     
+
+        }
+        for handle in handles{
+            handle.await.expect("couldn't manage handles.");
+        } 
+        println!("Finished all handles successfully.");
     }
     
 }
@@ -236,17 +270,17 @@ async fn sending_file(
 async fn handle_recieved_file(mut file_send: quinn::SendStream, mut file_recv: quinn::RecvStream) {
     // here we get the name size or the name length:
     let mut name_size_buf = [0u8; 2];
-    file_recv.read_exact(&mut name_size_buf).await.unwrap();
+    file_recv.read_exact(&mut name_size_buf).await.expect("error while reading: name_size_buf");
     let name_size = u16::from_be_bytes(name_size_buf) as usize;
 
     //here we read the acctual file name:
     let mut name_buf = vec![0u8; name_size];
-    file_recv.read_exact(&mut name_buf).await.unwrap();
+    file_recv.read_exact(&mut name_buf).await.expect("error while reading: name_buf");
     let file_name = String::from_utf8(name_buf).unwrap();
 
     //here we read the file size:
     let mut file_size_buf = [0u8; 8];
-    file_recv.read_exact(&mut file_size_buf).await.unwrap();
+    file_recv.read_exact(&mut file_size_buf).await.expect("error while reading: file_size_buf");
     let file_size = u64::from_be_bytes(file_size_buf);
 
     //here we write the whole recived file in the dist disk:
@@ -257,7 +291,7 @@ async fn handle_recieved_file(mut file_send: quinn::SendStream, mut file_recv: q
     path.push(&file_name);
     if std::path::Path::new(&path).exists() == true {
         println!("file already exists");
-        file_send.write_all(b"ALREADY_EXISTS").await.unwrap();
+        file_send.write_all(b"ALREADY_EXISTS").await.expect("couldn't read if the file exists or not.");
         file_send.finish().unwrap();
     } else {
         let mut recived_file = tokio::fs::File::create(format!("{}{}", where_to_write, file_name))
@@ -265,10 +299,8 @@ async fn handle_recieved_file(mut file_send: quinn::SendStream, mut file_recv: q
             .unwrap();
         tokio::io::copy(&mut file_recv, &mut recived_file)
             .await
-            .unwrap();
-        recived_file.flush().await.unwrap();
-        file_send.write_all(b"DONE").await.unwrap();
-        file_send.finish().unwrap();
+            .expect("error while copying the file.");
+        recived_file.flush().await.expect("error while flushing the file in the dest.");
         println!("wrote the file successfully in: {}", where_to_write);
     }
 }
@@ -289,6 +321,11 @@ async fn handle_sending_json(mut send: quinn::SendStream, mut _recv: quinn::Recv
     send.write_all(&(nonce.len() as u64).to_be_bytes()).await.unwrap();
     send.write_all(&nonce).await.unwrap();
     send.finish().unwrap();
+}
+
+async fn handle_sending_requested_file(dev_idx: DeviceIndex, send: quinn::SendStream, _recv: quinn::RecvStream, traget_id: usize){
+    let target_file = dev_idx.files.iter().find(|file| file.id == traget_id).expect("Could not find a file with this number.");
+    filing(target_file.path.to_str().unwrap(), send).await;
 }
 
 async fn receive_json_call(connection: &quinn::Connection){
@@ -320,7 +357,7 @@ async fn receive_json_call(connection: &quinn::Connection){
         Ok(f) => {
             println!("dycrypted successfully.");
             for file in &f.files{
-                println!("File name: {}, File size: {}, File path: {:?}, Is it a folder: {}", file.name, file.size, file.path, file.is_dir)
+                println!("{} - File name: {}, File size: {}, File path: {:?}, Is it a folder: {}", file.id, file.name, file.size, file.path, file.is_dir);
             }
         }
         Err(e) => {
@@ -349,27 +386,30 @@ async fn send_file_call(connection: &quinn::Connection, file_path: &str) {
     println!("The transfer speed is: {}MB/s", speed_mb_s);
 }
 
-async fn json_retriveing() -> (Vec<u8>, Vec<u8>, Vec<u8>) {
+async fn json_retriveing() -> (Vec<u8>, Vec<u8>, Vec<u8>, DeviceIndex) {
     let mut all_files: Vec<FileIndexing> = Vec::new();
-    match tokio::fs::read_dir(r"C:\Users\mmood\Documents\exe").await {
+    match tokio::fs::read_dir(r"A:\LINUX-WIN\مستودع").await {
         Ok(mut entries) => {
+            let mut counter: usize = 1;
             while let Ok(Some(entry)) = entries.next_entry().await {
                 let file = FileIndexing {
+                    id: counter,
                     name: entry.file_name().to_string_lossy().to_string(),
                     size: entry.metadata().await.unwrap().len(),
                     path: entry.path(),
                     is_dir: entry.file_type().await.unwrap().is_dir(),
                 };
+                counter += 1;
                 all_files.push(file);
             }
             let device = DeviceIndex { files: all_files };
             let json_bytes = serde_json::to_vec(&device).unwrap();
             let (encrypted_json, salt, nonce) = encrypting_json(json_bytes).await;
-            return (encrypted_json, salt, nonce);
+            return (encrypted_json, salt, nonce, device);
         }
         Err(e) => {
             println!("couldn't read... {}", e);
-            return (Vec::new(), Vec::new(), Vec::new());
+            return (Vec::new(), Vec::new(), Vec::new(), DeviceIndex {files: Vec::new()});
         }
     };
 }
@@ -446,13 +486,13 @@ async fn main() {
     let clients_cert = cert_chain.clone();
     
     println!("making the file index...");
-    let (encrypted_json, salt, nonce) = json_retriveing().await;
+    let (encrypted_json, salt, nonce, device_index) = json_retriveing().await;
     
     println!("Starting server...");
     //(4)
     //sending it to the server
     tokio::spawn(async move {
-        server(cert_chain.clone(), key, encrypted_json, salt, nonce).await;
+        server(cert_chain.clone(), key, encrypted_json, salt, nonce, device_index).await;
     });
     let response = get_input("Do you want to run the client? (y/n)").await;
     if response.to_lowercase() == "y"{
