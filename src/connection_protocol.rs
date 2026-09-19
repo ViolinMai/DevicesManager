@@ -13,10 +13,15 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use std::vec;
+use std::fs;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::net::UdpSocket;
 use whoami;
+use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
+use rustls::pki_types::{ServerName, UnixTime};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use jni::{objects::JString, JNIEnv};
 
@@ -40,6 +45,83 @@ struct FileIndexing {
 #[derive(Serialize, Deserialize, Debug, Clone)]
 struct DeviceIndex {
     files: Vec<FileIndexing>,
+}
+
+#[derive(Debug)]
+struct TofuVerifier {
+    target_device_name: String,
+}
+
+impl ServerCertVerifier for TofuVerifier {
+    fn verify_server_cert(
+        &self,
+        end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, rustls::Error> {
+        // reading the hash cert coming
+        let mut hasher = Sha256::new();
+        hasher.update(end_entity.as_ref());
+        let current_fingerprint = hex::encode(hasher.finalize());
+        // here we make a json for known peers we prevuoesly dealt with
+        let peers_file = "known_peers.json";
+        let mut known_peers: HashMap<String, String> = if Path::new(peers_file).exists() {
+            let data = std::fs::read_to_string(peers_file).unwrap_or_default();
+            serde_json::from_str(&data).unwrap_or_default()
+        } else {
+            HashMap::new()
+        };
+
+        // checking if that device is known
+        if let Some(saved_fingerprint) = known_peers.get(&self.target_device_name) {
+            if saved_fingerprint == &current_fingerprint {
+                // we know him
+                return Ok(ServerCertVerified::assertion());
+            } else {
+                // WHO IS THAT GUY????
+                eprintln!("\n⚠️ WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED! ⚠️");
+                return Err(rustls::Error::General("Host key fingerprint mismatch!".into()));
+            }
+        }
+
+        // first date
+        println!("\n[Security] New device discovered: {}", self.target_device_name);
+        println!("[Security] Fingerprint: {}", current_fingerprint);
+        
+        // getting their contact
+        known_peers.insert(self.target_device_name.clone(), current_fingerprint);
+        let json_data = serde_json::to_string_pretty(&known_peers).unwrap();
+        let _ = std::fs::write(peers_file, json_data);
+        println!("[Security] Device trusted and stored in known_peers.json");
+
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        _message: &[u8],
+        _cert: &CertificateDer<'_>,
+        _dss: &rustls::DigitallySignedStruct,
+    ) -> Result<rustls::client::danger::HandshakeSignatureValid, rustls::Error> {
+        Ok(rustls::client::danger::HandshakeSignatureValid::assertion())
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<rustls::SignatureScheme> {
+        rustls::crypto::ring::default_provider()
+            .signature_verification_algorithms
+            .supported_schemes()
+    }
 }
 
 #[cfg(target_os = "android")]
@@ -106,6 +188,18 @@ async fn get_input(prompt: &str) -> String {
 
 // This makes a new certificate and key and send it to main
 async fn make_cert_and_key() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'static>) {
+    let cert_path = Path::new("cert.der");
+    let key_path = Path::new("key.der");
+
+    if cert_path.exists() && key_path.exists(){
+        let cert_bytes = std::fs::read(cert_path).expect("Failed to read cert path.");
+        let key_bytes = std::fs::read(key_path).expect("Failed to read key path.");
+
+        let cert_der = CertificateDer::from(cert_bytes);
+        let key_der = PrivatePkcs8KeyDer::from(key_bytes);
+        let key = PrivateKeyDer::Pkcs8(key_der);
+        return (vec![cert_der], key);
+    }
     //(1)
     // server_name
     let subject_alt_names = vec!["localhost".to_string()];
@@ -113,17 +207,19 @@ async fn make_cert_and_key() -> (Vec<CertificateDer<'static>>, PrivateKeyDer<'st
     // generating a certificate
     let CertifiedKey { cert, signing_key } =
         generate_simple_self_signed(subject_alt_names).unwrap();
-    let cert_der: rustls::pki_types::CertificateDer<'static> = cert.der().clone();
-    let cert_chain: Vec<rustls::pki_types::CertificateDer<'static>> = vec![cert_der];
+    let cert_raw = cert.der().to_vec();
+    let key_raw = signing_key.serialize_der();
 
+    // saving the identity in the system
+    std::fs::write(cert_path, &cert_raw).expect("Failed to write the cert in system.");
+    std::fs::write(key_path, &key_raw).expect("Failed to write the key in system.");
     // making the key
-    let key_der: PrivatePkcs8KeyDer<'static> =
-        PrivatePkcs8KeyDer::from(signing_key.serialize_der());
-    let key: PrivateKeyDer<'static> = PrivateKeyDer::Pkcs8(key_der);
+    let cert_der = CertificateDer::from(cert_raw);
+    let key: PrivateKeyDer<'static> = PrivateKeyDer::Pkcs8(PrivatePkcs8KeyDer::from(key_raw));
 
     //sending to to main
     //(2)
-    (cert_chain, key)
+    (vec![cert_der], key)
 }
 
 // This handles the endpoints
@@ -139,8 +235,10 @@ async fn server(
 ) {
     //(5)
     //here we configured the server config to the local cert we made and the key
-    let config = ServerConfig::with_single_cert(cert_chain, key).unwrap();
-
+    let mut config = ServerConfig::with_single_cert(cert_chain, key).unwrap();
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap()));
+    config.transport_config(Arc::new(transport_config));
     //making the server address
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
 
@@ -247,23 +345,14 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     let mut store = rustls::RootCertStore::empty();
     store.add(cert[0].clone()).expect("an error happened while add certs.");
 
-    // here we changed the client config so they can trust the cert we created
-    // the without client auth means that it's a one way authintcation by the server
-    let rustls_config = rustls::ClientConfig::builder()
-        .with_root_certificates(store)
-        .with_no_client_auth();
 
-    // here we we gave quinn the nedded engine to operate and then passed it to the client
-    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config).unwrap();
-    let client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
-    client.set_default_client_config(client_config);
 
     // initiated a connection
     //(6-b)
     let broadcast_socket = UdpSocket::bind("0.0.0.0:0").await.expect("Failed to bind UDP socket");
     broadcast_socket.set_broadcast(true).expect("Failed to call a server");
     let massage = b"WHO IS THE SERVER?";
-    broadcast_socket.send_to(massage, "255.255.255.255:8888").await.expect("Failed to send broadcast message");
+    broadcast_socket.send_to(massage, "192.168.1.255:8888").await.expect("Failed to send broadcast message");
     println!("Broadcast message sent, waiting for response...");
     let mut responses = [0u8; 1024];
     let mut discovered_servers: Vec<DeviceInfo> = Vec::new();
@@ -299,6 +388,30 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     let chosen_server = get_input("Choose a server (num): ").await;
     let chosen_num: u8 = chosen_server.trim().parse::<u8>().expect("Couldn't turn the string to index.");
     let targeted_device = discovered_servers.iter().find(|device| device.index == chosen_num).expect("Couldn't find a server with the specified number.");
+    let target_name = targeted_device.name.clone();
+
+
+    // here we changed the client config so they can trust the cert we created
+    // the without client auth means that it's a one way authintcation by the server
+    let rustls_config = rustls::ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(TofuVerifier {
+            target_device_name: target_name,
+        }))
+        .with_no_client_auth();
+
+    // here we we gave quinn the nedded engine to operate and then passed it to the client
+    let quic_crypto = quinn::crypto::rustls::QuicClientConfig::try_from(rustls_config).unwrap();
+    let mut client_config = quinn::ClientConfig::new(Arc::new(quic_crypto));
+    let mut transport_config = quinn::TransportConfig::default();
+    transport_config.max_idle_timeout(Some(Duration::from_secs(300).try_into().unwrap())); // 5 mins so the connection doesn't die
+    transport_config.keep_alive_interval(Some(Duration::from_secs(2))); // a heartbeat every 2 secs
+
+    client_config.transport_config(Arc::new(transport_config)); 
+    client.set_default_client_config(client_config);
+
+
+
     let server_ip = targeted_device.ip.ip();
     let target_addr = SocketAddr::new(server_ip, 8080);
     println!("Connecting to server at: {}", target_addr);
@@ -357,12 +470,25 @@ async fn sending_file(
     mut file: tokio::fs::File,
 ) {
     // here we finally send the metadata and in the end the very file with tokio to sends the file in chunks so it doesn't fill the ram!
-
+    let start_time = Instant::now();
+    
+    
     file_send.write_all(&name_size.to_be_bytes()).await.unwrap();
     file_send.write_all(&name_bytes).await.unwrap();
     file_send.write_all(&file_size.to_be_bytes()).await.unwrap();
     let _ = tokio::io::copy(&mut file, &mut file_send).await;
     let _ = file_send.finish();
+
+    // network data
+    let duration = start_time.elapsed();
+    println!("it took: {}s", duration.as_secs_f32());
+    println!(
+        "the file size is: {}MB",
+        file_size as f32 / (1024.0 * 1024.0)
+    );
+    let size_mb: f32 = file_size as f32 / (1024.0 * 1024.0);
+    let speed_mb_s: f32 = size_mb / duration.as_secs_f32();
+    println!("The transfer speed is: {}MB/s", speed_mb_s);
 }
 
 async fn handle_recieved_file(mut file_send: quinn::SendStream, mut file_recv: quinn::RecvStream) {
