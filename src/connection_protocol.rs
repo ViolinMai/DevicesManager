@@ -11,11 +11,20 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use std::vec;
 use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::net::UdpSocket;
+use whoami;
+#[cfg(target_os = "android")]
+use jni::{objects::JString, JNIEnv};
+
+struct DeviceInfo {
+    index: u8,
+    name: String,
+    ip: SocketAddr,
+}
 
 // JSON STRUCT
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -25,6 +34,7 @@ struct FileIndexing {
     size: u64,
     path: std::path::PathBuf,
     is_dir: bool,
+    parent_dir: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
@@ -32,6 +42,56 @@ struct DeviceIndex {
     files: Vec<FileIndexing>,
 }
 
+#[cfg(target_os = "android")]
+use jni::{objects::JString, JNIEnv};
+
+/// Tries to fetch a recognizable system model or device name. 
+pub fn get_fallback_device_name(#[cfg(target_os = "android")] env: &mut JNIEnv) -> String {
+    
+    //WINDOWS & LINUX
+    #[cfg(any(target_os = "windows", target_os = "linux"))]
+    {
+        // Try getting the computer name first (e.g., "Desktop-XYZ")
+        let devname = whoami::devicename().expect("Couldn't get the device name.");
+        if devname != "localhost" && !devname.is_empty() {
+            return devname;
+        }
+        
+        // Fallback to OS type if computer name is generic
+        format!("{}", whoami::platform())
+    }
+
+    //ANDROID
+    #[cfg(target_os = "android")]
+    {
+        // Retrieves the manufacturing string + model code
+        get_android_hardware_details(env).unwrap_or_else(|_| "Android Device".to_string())
+    }
+
+    // FALLBACK FOR OTHER OS
+    #[cfg(not(any(target_os = "windows", target_os = "linux", target_os = "android")))]
+    {
+        "Generic Device".to_string()
+    }
+}
+
+/// Combines Manufacturer + Model to give the user a highly recognizable code
+#[cfg(target_os = "android")]
+fn get_android_hardware_details(env: &mut JNIEnv) -> Result<String, jni::errors::Error> {
+    let build_class = env.find_class("android/os/Build")?;
+    
+    // 1. Get Manufacturer (e.g., "Samsung")
+    let manu_jstring: JString = env.get_static_field(build_class, "MANUFACTURER", "Ljava/lang/String;")?
+        .l()?.into();
+    let manufacturer: String = env.get_string(&manu_jstring)?.into();
+
+    // 2. Get Model Code (e.g., "SM-S928B")
+    let model_jstring: JString = env.get_static_field(build_class, "MODEL", "Ljava/lang/String;")?
+        .l()?.into();
+    let model: String = env.get_string(&model_jstring)?.into();
+    
+    Ok(format!("{} {}", manufacturer, model))
+}
 
 async fn get_input(prompt: &str) -> String {
     println!("{}", prompt);
@@ -100,8 +160,15 @@ async fn server(
             match listen_socket.recv_from(&mut buffer).await{
                 Ok((bytes_read, client_addr)) => {
                     println!("Received {} bytes from {}", bytes_read, client_addr);
+                    let device_name = get_fallback_device_name();
+                    let device = DeviceInfo {
+                        index: 0,
+                        name: device_name,
+                        ip: client_addr,
+                    };
+                    let reply_message = format!("{}", device.name);
                     // Handle the received data
-                    match listen_socket.send_to(b"I AM THE SERVER", client_addr).await{
+                    match listen_socket.send_to(reply_message.as_bytes(), client_addr).await{
                         Ok(n) => {
                             println!("Sent {} bytes to {}", n, client_addr);
                             
@@ -198,10 +265,41 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     let massage = b"WHO IS THE SERVER?";
     broadcast_socket.send_to(massage, "255.255.255.255:8888").await.expect("Failed to send broadcast message");
     println!("Broadcast message sent, waiting for response...");
-    let mut buf = [0u8; 1024];
-    let recived_message = broadcast_socket.recv_from(&mut buf).await.expect("Failed to receive response");
-    println!("Received response from server: {}", String::from_utf8_lossy(&buf[..recived_message.0]));
-    let server_ip = recived_message.1.ip();
+    let mut responses = [0u8; 1024];
+    let mut discovered_servers: Vec<DeviceInfo> = Vec::new();
+    let mut index: u8 = 1;
+    loop{
+        match tokio::time::timeout(Duration::from_millis(1500), broadcast_socket.recv_from(&mut responses)).await{
+            Ok(Ok((bytes_read, server_addr))) => {
+                let msg = String::from_utf8_lossy(&responses[..bytes_read]).to_string();
+                println!("Received response from {}: {}", server_addr, msg);
+                discovered_servers.push(DeviceInfo{
+                    index: index,
+                    name: msg,
+                    ip: server_addr,
+                });
+                index +=1;
+            }
+            Ok(Err(e)) => {
+                eprintln!("Socket error: {}", e);
+                break;
+            }
+            Err(ee) => {
+                eprintln!("No more responses: {}", ee);
+                break;
+            }
+        }
+        
+        
+        
+    }
+    for (_index, device) in discovered_servers.iter().enumerate(){
+        println!("{} - Device name: {}, IP: {}",device.index, device.name, device.ip);
+    }
+    let chosen_server = get_input("Choose a server (num): ").await;
+    let chosen_num: u8 = chosen_server.trim().parse::<u8>().expect("Couldn't turn the string to index.");
+    let targeted_device = discovered_servers.iter().find(|device| device.index == chosen_num).expect("Couldn't find a server with the specified number.");
+    let server_ip = targeted_device.ip.ip();
     let target_addr = SocketAddr::new(server_ip, 8080);
     println!("Connecting to server at: {}", target_addr);
     let call = client
@@ -211,7 +309,7 @@ async fn client(cert: Vec<CertificateDer<'static>>) {
     let connection = call.unwrap();
     println!("connected to the server!");
     receive_json_call(&connection).await;
-    let sending_choice = get_input("Do you want to send a file? (y/n)");
+    let sending_choice = get_input("Do you want to request a file? (y/n)");
     if sending_choice.await.to_lowercase() == "y"{
         let code: u8 = 3;
 
@@ -357,7 +455,7 @@ async fn receive_json_call(connection: &quinn::Connection){
         Ok(f) => {
             println!("dycrypted successfully.");
             for file in &f.files{
-                println!("{} - File name: {}, File size: {}, File path: {:?}, Is it a folder: {}", file.id, file.name, file.size, file.path, file.is_dir);
+                println!("{} - File name: {}, File size: {}, File path: {:?}, Is it a folder: {}, Parent folder: {:?}", file.id, file.name, file.size, file.path, file.is_dir, file.parent_dir.as_deref().unwrap_or("None"));
             }
         }
         Err(e) => {
@@ -385,33 +483,44 @@ async fn send_file_call(connection: &quinn::Connection, file_path: &str) {
     let speed_mb_s: f32 = size_mb / duration.as_secs_f32();
     println!("The transfer speed is: {}MB/s", speed_mb_s);
 }
-
-async fn json_retriveing() -> (Vec<u8>, Vec<u8>, Vec<u8>, DeviceIndex) {
-    let mut all_files: Vec<FileIndexing> = Vec::new();
-    match tokio::fs::read_dir(r"A:\LINUX-WIN\مستودع").await {
-        Ok(mut entries) => {
-            let mut counter: usize = 1;
+async fn file_indexing(
+    all_files:&mut Vec<FileIndexing>,
+    counter:&mut usize,
+    root_path: PathBuf)
+    {
+    let mut dirs_to_scan = vec![root_path];
+    while let Some(current_dir) = dirs_to_scan.pop() {
+        if let Ok(mut entries) = tokio::fs::read_dir(&current_dir).await {
             while let Ok(Some(entry)) = entries.next_entry().await {
-                let file = FileIndexing {
-                    id: counter,
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).expect("Couldn't read.");
+                let path = entry.path();
+                if is_dir{
+                    dirs_to_scan.push(path);
+                }
+                else{
+                    let file = FileIndexing {
+                    id: *counter,
                     name: entry.file_name().to_string_lossy().to_string(),
                     size: entry.metadata().await.unwrap().len(),
                     path: entry.path(),
                     is_dir: entry.file_type().await.unwrap().is_dir(),
+                    parent_dir: path.parent().and_then(|p| p.file_name()).map(|name| name.to_string_lossy().to_string()),
                 };
-                counter += 1;
+                *counter += 1;
                 all_files.push(file);
+                }
             }
-            let device = DeviceIndex { files: all_files };
-            let json_bytes = serde_json::to_vec(&device).unwrap();
-            let (encrypted_json, salt, nonce) = encrypting_json(json_bytes).await;
-            return (encrypted_json, salt, nonce, device);
         }
-        Err(e) => {
-            println!("couldn't read... {}", e);
-            return (Vec::new(), Vec::new(), Vec::new(), DeviceIndex {files: Vec::new()});
-        }
-    };
+    }
+}
+async fn json_retriveing() -> (Vec<u8>, Vec<u8>, Vec<u8>, DeviceIndex) {
+    let mut all_files: Vec<FileIndexing> = Vec::new();
+    let mut counter: usize = 1;
+    file_indexing(&mut all_files, &mut counter, PathBuf::from(r"A:\LINUX-WIN\مستودع")).await;
+    let device = DeviceIndex { files: all_files };
+    let json_bytes = serde_json::to_vec(&device).unwrap();
+    let (encrypted_json, salt, nonce) = encrypting_json(json_bytes).await;
+    return (encrypted_json, salt, nonce, device);
 }
 
 async fn encrypting_json(json_bytes: Vec<u8>) -> (Vec<u8>, Vec<u8>, Vec<u8>) {
