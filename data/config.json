@@ -1,0 +1,6 @@
+{
+  "device_name": "Reze-PC",
+  "share_root": "A:\\LINUX-WIN\\مستودع",
+  "download_dir": "./downloads",
+  "broadcast_addr": "192.168.1.255:8888"
+}
