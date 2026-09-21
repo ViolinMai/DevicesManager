@@ -13,6 +13,9 @@ use tokio::io::AsyncWriteExt;
 use tokio::io::{self, AsyncBufReadExt, BufReader};
 use tokio::net::UdpSocket;
 use tokio::fs;
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use whoami;
 use rustls::client::danger::{ServerCertVerified, ServerCertVerifier};
 use rustls::pki_types::{ServerName, UnixTime};
@@ -20,6 +23,39 @@ use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 #[cfg(target_os = "android")]
 use jni::{objects::JString, JNIEnv};
+
+
+
+pub struct ServerHandle {
+    shutdown: CancellationToken,
+    task: tokio::task::JoinHandle<()>,
+}
+ 
+impl ServerHandle {
+    pub async fn stop(self) {
+        // 1. ring the bell: every task that listens to the token wakes up
+        self.shutdown.cancel();
+        // 2. wait until the server task has really finished
+        //    (after this, ports 8080 and 8888 are free again)
+        let _ = self.task.await;
+    }
+}
+pub fn start_server(
+    cert_chain: Vec<rustls::pki_types::CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> ServerHandle {
+    let shutdown = CancellationToken::new();
+    let shutdown_for_server = shutdown.clone(); // same bell, second handle
+ 
+    let task = tokio::spawn(async move {
+        if let Err(e) = server(cert_chain, key,shutdown_for_server).await {
+            eprintln!("Server encountered error: {:?}", e);
+        }
+    });
+ 
+    ServerHandle { shutdown, task }
+}
+
 
 struct DeviceInfo {
     index: u8,
@@ -412,74 +448,83 @@ async fn server(
     // this id the listner endpoint
     cert_chain: Vec<rustls::pki_types::CertificateDer<'static>>,
     key: PrivateKeyDer<'static>,
-    json_bytes: Vec<u8>,
-    device_index: DeviceIndex,
+    shutdown: CancellationToken,
 ) -> Result<(), AppError> {
     //(5)
     //here we configured the server config to the local cert we made and the key
     let client_verifier = Arc::new(TofuClientVerifier);
-
+ 
     let server_crypto = rustls::ServerConfig::builder()
         .with_client_cert_verifier(client_verifier) // إجبار العميل على تقديم شهادته وفحصها
         .with_single_cert(cert_chain, key)?;
-
+ 
     let mut config = ServerConfig::with_crypto(Arc::new(
     quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
         .map_err(|e| AppError::NetworkError(format!("{:?}", e)))?,
     ));
-
+ 
     let mut transport_config = quinn::TransportConfig::default();
     transport_config.max_idle_timeout(Some(Duration::from_secs(300).try_into().map_err(|_| AppError::NetworkError("Timeout conversion failed".to_string()))?));
     config.transport_config(Arc::new(transport_config));
     //making the server address
     let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080);
-
+ 
     //here the server boots
     let endpoint = Endpoint::server(config, addr)?;
-
-    // cloning the file index to pass it to the server
-    let dev_idx_stream = device_index.clone();
-
+ 
     // a while loop to listen
     //(5-b) we are opening a broadcast channel to listen for clients
     let listen_socket = tokio::net::UdpSocket::bind("0.0.0.0:8888").await?;
-    tokio::spawn(async move{
+    let discovery_shutdown = shutdown.clone(); // NEW
+    let discovery_task = tokio::spawn(async move{ // CHANGED: we keep the handle now (was: tokio::spawn(async move{ )
         let mut buffer = [0u8; 1024];
         loop{
-            match listen_socket.recv_from(&mut buffer).await{
-                Ok((bytes_read, client_addr)) => {
-                    println!("Received {} bytes from {}", bytes_read, client_addr);
-                    let device_name = get_fallback_device_name();
-                    let device = DeviceInfo {
-                        index: 0,
-                        name: device_name,
-                        ip: client_addr,
-                    };
-                    let reply_message = format!("{}", device.name);
-                    // Handle the received data
-                    match listen_socket.send_to(reply_message.as_bytes(), client_addr).await{
-                        Ok(n) => {
-                            println!("Sent {} bytes to {}", n, client_addr);
-                            
+            // wait for EITHER a packet OR the stop signal
+            tokio::select! {
+                _ = discovery_shutdown.cancelled() => break,
+                result = listen_socket.recv_from(&mut buffer) => {
+                    match result{
+                        Ok((bytes_read, client_addr)) => {
+                            println!("Received {} bytes from {}", bytes_read, client_addr);
+                            let device_name = get_fallback_device_name();
+                            let device = DeviceInfo {
+                                index: 0,
+                                name: device_name,
+                                ip: client_addr,
+                            };
+                            let reply_message = format!("{}", device.name);
+                            // Handle the received data
+                            match listen_socket.send_to(reply_message.as_bytes(), client_addr).await{
+                                Ok(n) => {
+                                    println!("Sent {} bytes to {}", n, client_addr);
+                                    
+                                },
+                                Err(e) => {
+                                    eprintln!("Failed to send data: {}", e);
+                                }
+                            };
                         },
                         Err(e) => {
-                            eprintln!("Failed to send data: {}", e);
+                            eprintln!("Failed to receive data: {}", e);
                         }
-                    };
-                },
-                Err(e) => {
-                    eprintln!("Failed to receive data: {}", e);
+                    }
                 }
-
-        };
-        
-    }
-
-
+            }
+        }
+        // when we leave the loop the socket is dropped, so port 8888 is released
     });
     
     //(6-a)
-    while let Some(incoming) = endpoint.accept().await {
+    loop {
+        // wait for EITHER a new connection OR the stop signal
+        let incoming = tokio::select! {
+            _ = shutdown.cancelled() => break,
+            maybe_incoming = endpoint.accept() => match maybe_incoming {
+                Some(incoming) => incoming,
+                None => break,
+            },
+        };
+        let (json_bytes, dev_idx_stream) = json_retriveing().await?;
         let j = json_bytes.clone();
         let dev_idx_clone = dev_idx_stream.clone();
         tokio::spawn(async move {
@@ -491,7 +536,7 @@ async fn server(
                 }
             };
             loop {
-                let (mut send, mut recv) = match call.accept_bi().await {
+                let (send, mut recv) = match call.accept_bi().await {
                     Ok(stream) => stream,
                     Err(_) => break,
                 };
@@ -537,8 +582,18 @@ async fn server(
             }
         });
     }
+ 
+    // clean shutdown (we get here only after stop() rings the bell)
+    println!("Server shutting down...");
+    // closes every open connection, so their tasks get an error on accept_bi() and end
+    endpoint.close(0u32.into(), b"server shutting down");
+    // wait for the discovery task, so port 8888 is really free when stop() returns
+    let _ = discovery_task.await;
+    // give the connections a moment to finish closing (max 2 seconds)
+    let _ = tokio::time::timeout(Duration::from_secs(2), endpoint.wait_idle()).await;
     Ok(())
 }
+
 
 async fn client(cert: Vec<CertificateDer<'static>>, key: PrivateKeyDer<'static>) -> Result<(), AppError> {
     let addr: SocketAddr = "0.0.0.0:0".parse().map_err(|e: std::net::AddrParseError| AppError::NetworkError(e.to_string()))?;
@@ -891,27 +946,30 @@ async fn main() -> Result<(), AppError> {
     let cert_clone = cert_chain.clone();
     let key_clone = key.clone_key();
     println!("making the file index...");
-    let (json_bytes, device_index) = json_retriveing().await?;
+    
     
     println!("Starting server...");
     //(4)
     //sending it to the server
-    tokio::spawn(async move {
-        if let Err(e) = server(cert_clone.clone(), key_clone, json_bytes, device_index).await {
-            eprintln!("Server encountered error: {:?}", e);
+    let server = start_server(cert_clone, key_clone);
+    loop {
+        let cert_clone = cert_chain.clone();
+        let key_clone = key.clone_key();
+        let response = get_input("Press 'q' to stop the server.\nPress 'c' to start the client.").await?;
+        if response.to_lowercase() == "c"{
+            println!("Starting client...");
+            if let Err(e) = client(cert_clone, key_clone).await {
+                println!("An Error happened while booting the client: {:?}", e)
+            }
         }
-    });
-    let response = get_input("Do you want to run the client? (y/n)").await?;
-    if response.to_lowercase() == "y"{
-        println!("Starting client...");
-        client(cert_chain, key).await?;
-    }else {
-        println!("Client not started.");
-        let server_life = get_input("Press 'q' to stop the server.").await?;
-        if server_life.to_lowercase() == "q" {
-            return Ok(());
+        else if response.to_lowercase() == "q" {
+            break;
+        }
+        else {
+            continue;
         }
     }
-
+    server.stop().await;
+    println!("Server stopped.");
     Ok(())
 }
