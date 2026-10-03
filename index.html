@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <title>DevicesManager Web - Secure P2P</title>
+  <title>DevicesManager Web - Fast P2P & Screen Mirror</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -23,13 +23,13 @@
     <div class="max-w-4xl mx-auto px-4 h-15 py-3 flex items-center justify-between">
       <div class="flex items-center gap-3">
         <div class="w-9 h-9 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/20">
-          <i class="fa-solid fa-bolt text-white text-sm"></i>
+          <i class="fa-solid fa-network-wired text-white text-sm"></i>
         </div>
         <div>
           <h1 class="font-bold text-base tracking-wide text-white flex items-center gap-1.5">
-            DevicesManager <span class="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-md font-mono">v2</span>
+            DevicesManager <span class="text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 px-1.5 py-0.2 rounded-md font-mono">v3</span>
           </h1>
-          <p class="text-[11px] text-slate-400">P2P File Transfer • ECDSA Auth</p>
+          <p class="text-[11px] text-slate-400">P2P File Transfer & Screen Mirroring</p>
         </div>
       </div>
       <div id="connectionStatusBadge" class="flex items-center gap-2 text-xs px-3 py-1 rounded-full bg-slate-900 border border-slate-800 text-slate-300">
@@ -42,17 +42,15 @@
   <!-- Main Container -->
   <main class="max-w-4xl mx-auto p-4 sm:p-6 w-full flex-1 space-y-5">
 
-    <!-- Primary Action Card: Quick Connect & Identity -->
+    <!-- Card 1: My Identity & Direct Connect -->
     <div class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
-      
-      <!-- Top Row: My ID Display & Quick Connect -->
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         
         <!-- My Peer ID Box -->
         <div class="bg-[#070a13] border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
           <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
             <span class="font-medium flex items-center gap-1.5">
-              <i class="fa-solid fa-fingerprint text-purple-400"></i> معرّفي (My ID):
+              <i class="fa-solid fa-fingerprint text-purple-400"></i> معرّف جهازي (My ID):
             </span>
             <button id="btnCopyMyId" class="text-purple-400 hover:text-purple-300 transition text-[11px] flex items-center gap-1">
               <i class="fa-regular fa-copy"></i> نسخ
@@ -66,10 +64,10 @@
           </div>
         </div>
 
-        <!-- Connect to Peer Box -->
+        <!-- Connect by ID Box -->
         <div class="bg-[#070a13] border border-slate-800/80 rounded-xl p-3 flex flex-col justify-between">
           <label class="text-xs text-slate-400 block mb-1.5 font-medium flex items-center gap-1.5">
-            <i class="fa-solid fa-link text-indigo-400"></i> الاتصال بجهاز (Remote ID):
+            <i class="fa-solid fa-link text-indigo-400"></i> اقتران يدوي بـ ID:
           </label>
           <div class="flex gap-2">
             <input type="text" id="remotePeerIdInput" placeholder="أدخل ID الجهاز الآخر..." 
@@ -81,36 +79,81 @@
         </div>
 
       </div>
-
-      <!-- Active Connected Peers Strip -->
-      <div id="connectedPeersStrip" class="hidden pt-2 border-t border-slate-800/60">
-        <div class="text-[11px] text-slate-400 mb-2 font-medium">الأجهزة المتصلة الجاهزة للتبادل:</div>
-        <div id="connectedPeersList" class="flex flex-wrap gap-2"></div>
-      </div>
-
     </div>
 
-    <!-- Dropzone & Send Multi-files Area -->
+    <!-- Card 2: Devices Hub (Real-time Discovered & Connected Peers) -->
+    <div class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-laptop-mobile text-indigo-400"></i> الأجهزة المعروفة والمتصلة
+        </h2>
+        <span id="activePeersBadge" class="text-[11px] bg-slate-800 text-slate-400 px-2 py-0.5 rounded-full mono">0 متصل</span>
+      </div>
+
+      <div id="knownDevicesGrid" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+        <!-- Populated via renderKnownDevicesGrid() -->
+        <div class="col-span-full text-center py-5 text-xs text-slate-500 border border-dashed border-slate-800/80 rounded-xl">
+          لم يتم تسجيل أي أجهزة بعد. اتصل بأي جهاز لتثبيته هنا للاقتران السريع.
+        </div>
+      </div>
+    </div>
+
+    <!-- Card 3: Screen Mirroring Area -->
     <div class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
       <div class="flex items-center justify-between">
         <h2 class="text-sm font-bold text-white flex items-center gap-2">
-          <i class="fa-solid fa-paper-plane text-purple-400"></i> إرسال الملفات
+          <i class="fa-solid fa-display text-cyan-400"></i> مشاركة وعرض الشاشة (Screen Mirroring)
+        </h2>
+        <span id="screenStatusBadge" class="text-[11px] text-slate-500">خامل</span>
+      </div>
+
+      <!-- Controls Strip -->
+      <div class="flex flex-wrap items-center gap-2.5">
+        <button id="btnStartScreenShare" class="px-3.5 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-cyan-600/20">
+          <i class="fa-solid fa-arrow-up-right-from-square"></i> بث شاشتي للأجهزة المتصلة
+        </button>
+        <button id="btnStopScreenShare" class="hidden px-3.5 py-2 bg-red-600 hover:bg-red-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-red-600/20">
+          <i class="fa-solid fa-stop"></i> إيقاف البث
+        </button>
+        <span class="text-[11px] text-slate-400 leading-snug">
+          (متوافق مع أجهزة الكمبيوتر ويدعم المشاهدة المباشرة على الآيباد والجوالات)
+        </span>
+      </div>
+
+      <!-- Screen Video Viewer Container -->
+      <div id="mirrorViewerBox" class="hidden relative bg-black rounded-xl overflow-hidden border border-slate-800 shadow-2xl aspect-video max-h-[480px]">
+        <video id="mirrorVideo" autoplay playsinline controls class="w-full h-full object-contain"></video>
+        <div class="absolute top-2.5 left-2.5 bg-slate-900/80 backdrop-blur px-2.5 py-1 rounded-lg text-[11px] text-cyan-300 border border-slate-700/60 flex items-center gap-2 z-10">
+          <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+          <span id="mirrorPeerTag">بث شاشة مباشر</span>
+        </div>
+        <button id="btnCloseViewer" class="absolute top-2.5 right-2.5 bg-slate-900/80 hover:bg-red-600 text-slate-300 hover:text-white w-7 h-7 rounded-lg flex items-center justify-center text-xs transition z-10">
+          <i class="fa-solid fa-xmark"></i>
+        </button>
+      </div>
+    </div>
+
+    <!-- Card 4: Send Multi-files Area -->
+    <div class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl space-y-4">
+      <div class="flex items-center justify-between">
+        <h2 class="text-sm font-bold text-white flex items-center gap-2">
+          <i class="fa-solid fa-paper-plane text-purple-400"></i> إرسال وتبادل الملفات
         </h2>
         <span class="text-[11px] text-slate-400">P2P Stream مباشر</span>
       </div>
 
       <!-- Drag & Drop Zone -->
-      <div id="dropZone" class="border-2 border-dashed border-slate-700/80 hover:border-purple-500 rounded-xl p-6 sm:p-8 text-center cursor-pointer transition bg-[#070a13]/50 hover:bg-[#070a13] group">
+      <div id="dropZone" class="border-2 border-dashed border-slate-700/80 hover:border-purple-500 rounded-xl p-6 sm:p-7 text-center cursor-pointer transition bg-[#070a13]/50 hover:bg-[#070a13] group">
         <input type="file" id="fileInput" multiple class="hidden">
-        <div class="w-11 h-11 mx-auto rounded-full bg-slate-800/80 group-hover:bg-purple-600/20 group-hover:text-purple-400 flex items-center justify-center text-slate-400 transition mb-2">
-          <i class="fa-solid fa-cloud-arrow-up text-lg"></i>
+        <div class="w-10 h-10 mx-auto rounded-full bg-slate-800/80 group-hover:bg-purple-600/20 group-hover:text-purple-400 flex items-center justify-center text-slate-400 transition mb-2">
+          <i class="fa-solid fa-cloud-arrow-up text-base"></i>
         </div>
         <p class="text-xs sm:text-sm font-semibold text-slate-200">اضغط لاختيار ملفات أو اسحبها هنا</p>
-        <p class="text-[11px] text-slate-500 mt-1">يدعم إرسال ملفات متعددة دفعة واحدة لأي هاتف أو كمبيوتر</p>
+        <p class="text-[11px] text-slate-500 mt-0.5">يدعم إرسال ملفات متعددة مع الحفاظ التام على الأسماء والامتدادات</p>
       </div>
 
       <!-- Selected Files Queue -->
-      <div id="sendQueueContainer" class="hidden pt-2 space-y-3">
+      <div id="sendQueueContainer" class="hidden pt-1 space-y-3">
         <div class="flex items-center justify-between text-xs">
           <span class="font-bold text-slate-300">الملفات الجاهزة للإرسال:</span>
           <span id="sendQueueSummary" class="text-slate-400 mono">0 ملفات</span>
@@ -122,23 +165,23 @@
       </div>
     </div>
 
-    <!-- Active Transfers (Live Progress) -->
+    <!-- Card 5: Active Transfers (Live Progress) -->
     <div class="bg-slate-900/90 border border-slate-800/90 rounded-2xl p-4 sm:p-5 shadow-xl space-y-3">
       <h2 class="text-sm font-bold text-white flex items-center gap-2">
         <i class="fa-solid fa-arrows-rotate text-emerald-400"></i> عمليات النقل الحالية
       </h2>
       <div id="transfersList" class="space-y-2.5">
-        <div id="emptyTransfers" class="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-800/80 rounded-xl">
+        <div id="emptyTransfers" class="text-center py-5 text-xs text-slate-500 border border-dashed border-slate-800/80 rounded-xl">
           لا توجد عمليات نقل جارية حالياً
         </div>
       </div>
     </div>
 
-    <!-- More Options Accordion / Collapsible (Secondary Settings) -->
+    <!-- More Options Accordion (Secondary Settings) -->
     <div class="bg-slate-900/60 border border-slate-800/70 rounded-2xl overflow-hidden shadow-lg">
       <button id="toggleMoreOptions" class="w-full px-5 py-3.5 text-xs sm:text-sm font-bold text-slate-300 flex items-center justify-between hover:bg-slate-800/40 transition">
         <span class="flex items-center gap-2">
-          <i class="fa-solid fa-sliders text-slate-400"></i> إعدادات متقدمة وخيارات إضافية (More Options)
+          <i class="fa-solid fa-sliders text-slate-400"></i> خيارات متقدمة وإدارة البصمة
         </span>
         <i id="moreOptionsChevron" class="fa-solid fa-chevron-down text-slate-400 transition-transform duration-200"></i>
       </button>
@@ -149,7 +192,7 @@
         <div class="space-y-2">
           <label class="text-xs text-slate-400 block font-medium">تغيير الـ ID المخصص (Custom ID):</label>
           <div class="flex gap-2">
-            <input type="text" id="myCustomIdInput" placeholder="مثال: my-pc, ipad-pro..." 
+            <input type="text" id="myCustomIdInput" placeholder="مثال: my-desktop, ipad-note..." 
               class="flex-1 bg-slate-900 border border-slate-700/80 rounded-xl px-3 py-1.5 text-xs text-purple-200 mono focus:outline-none focus:border-purple-500">
             <button id="btnSetCustomId" class="px-3.5 py-1.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition">
               تعيين وتحديث
@@ -166,15 +209,15 @@
           </div>
         </div>
 
-        <!-- Trusted Peers (TOFU Store) -->
-        <div class="space-y-2.5 pt-2 border-t border-slate-800/60">
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-slate-300 flex items-center gap-1.5">
-              <i class="fa-solid fa-shield-halved text-emerald-400"></i> الأجهزة الموثوقة (TOFU Registry)
-            </span>
-            <button id="btnClearTofu" class="text-[11px] text-red-400 hover:text-red-300 transition">مسح القائمة</button>
+        <!-- Clear Stored Devices -->
+        <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+          <div>
+            <span class="text-xs font-bold text-slate-300 block">سجل الأجهزة المحفوظة</span>
+            <span class="text-[11px] text-slate-500">مسح الأجهزة المسجلة من الذاكرة المحلية</span>
           </div>
-          <div id="tofuList" class="space-y-1.5 max-h-36 overflow-y-auto pr-1"></div>
+          <button id="btnClearTofu" class="px-3 py-1.5 bg-red-950/60 border border-red-800/80 hover:bg-red-900/60 text-red-400 rounded-lg text-xs font-bold transition">
+            مسح كافة الأجهزة
+          </button>
         </div>
 
         <!-- Transfer History -->
@@ -236,13 +279,13 @@
 
   <script>
     // ========================================================
-    // Constants & IndexedDB Cryptographic Key Management
+    // Constants & Cryptographic State
     // ========================================================
-    const CHUNK_SIZE = 64 * 1024; // Exactly 64 KB (Correct Syntax)
+    const CHUNK_SIZE = 64 * 1024; // 64 KB
     const DB_NAME = 'DM_CryptoStore';
     const STORE_NAME = 'keypairs';
-    const TOFU_STORAGE_KEY = 'dm_tofu_registry_v2';
-    const MY_ID_STORAGE_KEY = 'dm_my_custom_id_v2';
+    const TOFU_STORAGE_KEY = 'dm_tofu_registry_v3';
+    const MY_ID_STORAGE_KEY = 'dm_my_custom_id_v3';
 
     let peer = null;
     let myId = '';
@@ -254,7 +297,10 @@
     let selectedFilesToSend = [];
     let pendingTofuDecision = null;
 
-    // Helper: Format Bytes
+    // Screen Mirroring State
+    let localScreenStream = null;
+    let activeMediaCalls = new Map(); // peerId -> MediaConnection
+
     function formatBytes(bytes) {
       if (bytes === 0) return '0 B';
       const k = 1024;
@@ -263,7 +309,6 @@
       return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
     }
 
-    // Helper: ArrayBuffer to Hex & Hex to ArrayBuffer
     function buf2hex(buffer) {
       return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
     }
@@ -275,7 +320,9 @@
       return bytes.buffer;
     }
 
-    // Initialize or load ECDSA P-256 Keypair from IndexedDB
+    // ========================================================
+    // IndexedDB ECDSA P-256 Key Management
+    // ========================================================
     async function initCryptoIdentity() {
       return new Promise((resolve, reject) => {
         const req = indexedDB.open(DB_NAME, 1);
@@ -295,7 +342,6 @@
               if (getReq.result) {
                 myCryptoKeyPair = getReq.result;
               } else {
-                // Generate new ECDSA keypair
                 myCryptoKeyPair = await crypto.subtle.generateKey(
                   { name: 'ECDSA', namedCurve: 'P-256' },
                   false,
@@ -305,14 +351,10 @@
                 writeTx.objectStore(STORE_NAME).put(myCryptoKeyPair, 'identityKey');
               }
 
-              // Export public key to raw bytes for fingerprinting
               const rawPub = await crypto.subtle.exportKey('raw', myCryptoKeyPair.publicKey);
               myPublicKeyRawHex = buf2hex(rawPub);
-              
-              // Fingerprint is SHA-256 of the raw public key
               const hashBuf = await crypto.subtle.digest('SHA-256', rawPub);
               myFingerprint = buf2hex(hashBuf);
-
               resolve();
             };
           } catch (err) {
@@ -323,7 +365,6 @@
       });
     }
 
-    // Digital Signature Handshake Helpers
     async function signChallenge(nonceStr) {
       const enc = new TextEncoder();
       const sig = await crypto.subtle.sign(
@@ -336,23 +377,19 @@
 
     async function verifyChallenge(rawPubHex, signatureHex, nonceStr) {
       try {
-        const rawPubBuf = hex2buf(rawPubHex);
-        const sigBuf = hex2buf(signatureHex);
         const pubKey = await crypto.subtle.importKey(
           'raw',
-          rawPubBuf,
+          hex2buf(rawPubHex),
           { name: 'ECDSA', namedCurve: 'P-256' },
           true,
           ['verify']
         );
-        const enc = new TextEncoder();
-        const valid = await crypto.subtle.verify(
+        return await crypto.subtle.verify(
           { name: 'ECDSA', hash: { name: 'SHA-256' } },
           pubKey,
-          sigBuf,
-          enc.encode(nonceStr)
+          hex2buf(signatureHex),
+          new TextEncoder().encode(nonceStr)
         );
-        return valid;
       } catch (e) {
         console.error('Signature verification error:', e);
         return false;
@@ -360,7 +397,7 @@
     }
 
     // ========================================================
-    // TOFU Registry (Verified Identity Storage)
+    // TOFU Storage
     // ========================================================
     const TofuManager = {
       getPeers() {
@@ -375,20 +412,20 @@
         peers[peerId] = {
           fingerprint,
           rawPublicKey,
-          trustedAt: new Date().toISOString()
+          lastSeen: new Date().toISOString()
         };
         localStorage.setItem(TOFU_STORAGE_KEY, JSON.stringify(peers));
-        renderTofuList();
+        renderKnownDevicesGrid();
       },
       removePeer(peerId) {
         const peers = this.getPeers();
         delete peers[peerId];
         localStorage.setItem(TOFU_STORAGE_KEY, JSON.stringify(peers));
-        renderTofuList();
+        renderKnownDevicesGrid();
       },
       clearAll() {
         localStorage.removeItem(TOFU_STORAGE_KEY);
-        renderTofuList();
+        renderKnownDevicesGrid();
       },
       evaluate(peerId, incomingFingerprint) {
         const peers = this.getPeers();
@@ -398,27 +435,70 @@
       }
     };
 
-    function renderTofuList() {
-      const container = document.getElementById('tofuList');
-      const peers = TofuManager.getPeers();
-      const keys = Object.keys(peers);
+    // ========================================================
+    // Devices Hub: Real-Time Grid on Home Page
+    // ========================================================
+    function renderKnownDevicesGrid() {
+      const grid = document.getElementById('knownDevicesGrid');
+      const badge = document.getElementById('activePeersBadge');
+      const knownPeers = TofuManager.getPeers();
+      const knownKeys = Object.keys(knownPeers);
 
-      if (keys.length === 0) {
-        container.innerHTML = '<div class="text-center py-3 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">لا توجد أجهزة مسجلة في قائمة الثقة</div>';
+      // Collect all peers: both saved in TOFU and currently active connections
+      const allPeerIds = new Set([...knownKeys, ...activeConnections.keys()]);
+
+      badge.innerText = `${activeConnections.size} متصل`;
+
+      if (allPeerIds.size === 0) {
+        grid.innerHTML = `
+          <div class="col-span-full text-center py-5 text-xs text-slate-500 border border-dashed border-slate-800/80 rounded-xl">
+            لم يتم تسجيل أي أجهزة بعد. اتصل بأي جهاز لتثبيته هنا للاقتران السريع.
+          </div>`;
         return;
       }
 
-      container.innerHTML = keys.map(id => `
-        <div class="bg-slate-950 p-2 rounded-xl border border-slate-800 flex items-center justify-between text-xs">
-          <div class="truncate flex-1 pl-2">
-            <span class="font-bold text-slate-200 mono">${id}</span>
-            <div class="mono text-[10px] text-slate-500 truncate">${peers[id].fingerprint}</div>
+      grid.innerHTML = Array.from(allPeerIds).map(peerId => {
+        const isOnline = activeConnections.has(peerId);
+        const peerData = knownPeers[peerId] || {};
+        const fpShort = peerData.fingerprint ? peerData.fingerprint.substring(0, 10) + '...' : 'موثق حديثاً';
+
+        return `
+          <div class="bg-[#070a13] border ${isOnline ? 'border-emerald-800/80 shadow-md shadow-emerald-950/20' : 'border-slate-800'} rounded-xl p-3 flex items-center justify-between transition">
+            <div class="flex items-center gap-2.5 truncate flex-1 pl-2">
+              <div class="relative">
+                <div class="w-8 h-8 rounded-lg ${isOnline ? 'bg-emerald-950/80 text-emerald-400' : 'bg-slate-800 text-slate-400'} flex items-center justify-center text-sm">
+                  <i class="fa-solid fa-laptop"></i>
+                </div>
+                <span class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full ${isOnline ? 'bg-emerald-400 border-2 border-[#070a13] animate-pulse' : 'bg-slate-600'}"></span>
+              </div>
+              <div class="truncate">
+                <div class="flex items-center gap-1.5">
+                  <span class="mono font-bold text-xs text-slate-200 truncate">${peerId}</span>
+                  <span class="text-[9px] px-1.5 py-0.2 rounded-full font-medium ${isOnline ? 'bg-emerald-950 text-emerald-300 border border-emerald-800' : 'bg-slate-800 text-slate-400'}">
+                    ${isOnline ? 'متصل' : 'محفوظ'}
+                  </span>
+                </div>
+                <div class="mono text-[10px] text-slate-500 truncate mt-0.5">FP: ${fpShort}</div>
+              </div>
+            </div>
+
+            <div class="flex items-center gap-1.5 shrink-0">
+              ${isOnline ? `
+                <button onclick="disconnectPeer('${peerId}')" class="px-2.5 py-1.5 bg-red-950/60 border border-red-800/60 hover:bg-red-900/60 text-red-400 rounded-lg text-[11px] font-bold transition flex items-center gap-1" title="قطع الاتصال">
+                  <i class="fa-solid fa-power-off"></i> قطع
+                </button>
+              ` : `
+                <button onclick="connectToRemotePeer('${peerId}')" class="px-2.5 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-[11px] font-bold transition flex items-center gap-1" title="اتصال سريع">
+                  <i class="fa-solid fa-bolt"></i> اتصال
+                </button>
+              `}
+              <button onclick="TofuManager.removePeer('${peerId}')" class="text-slate-500 hover:text-red-400 p-1.5 text-xs transition" title="إزالة من القائمة">
+                <i class="fa-solid fa-trash-can"></i>
+              </button>
+            </div>
           </div>
-          <button onclick="TofuManager.removePeer('${id}')" class="text-slate-500 hover:text-red-400 p-1">
-            <i class="fa-solid fa-trash-can"></i>
-          </button>
-        </div>
-      `).join('');
+        `;
+      }).join('');
     }
 
     // ========================================================
@@ -453,10 +533,24 @@
         myId = id;
         document.getElementById('myActiveId').innerText = myId;
         updateStatusBadge('ready', 'جاهز للاقتران والتبادل');
+        renderKnownDevicesGrid();
       });
 
+      // Handle Data Connections
       peer.on('connection', (conn) => {
         setupIncomingHandshake(conn);
+      });
+
+      // Handle Incoming Screen Share Streams
+      peer.on('call', (call) => {
+        console.log('Incoming screen share call from:', call.peer);
+        call.answer(); // Answer without sending local stream
+        call.on('stream', (remoteStream) => {
+          displayRemoteScreen(remoteStream, call.peer);
+        });
+        call.on('close', () => {
+          hideRemoteScreen();
+        });
       });
 
       peer.on('disconnected', () => {
@@ -493,7 +587,7 @@
     }
 
     // ========================================================
-    // Authenticated Handshake (Challenge-Response ECDSA)
+    // Authenticated Handshake (ECDSA Verification)
     // ========================================================
     function connectToRemotePeer(remoteId) {
       if (!remoteId || remoteId === myId) {
@@ -509,7 +603,6 @@
       const conn = peer.connect(remoteId, { reliable: true });
 
       conn.on('open', async () => {
-        // Step 1: Initiator sends Handshake with Nonce challenge and public key
         const myNonce = crypto.randomUUID();
         const signature = await signChallenge(myNonce);
 
@@ -536,7 +629,6 @@
         
         // 1. Responder receives Init
         if (data.type === 'SECURE_HANDSHAKE_INIT') {
-          // Verify Initiator's Signature
           const isValid = await verifyChallenge(data.rawPublicKey, data.signature, data.nonce);
           if (!isValid) {
             console.error('Handshake rejected: Invalid digital signature!');
@@ -544,7 +636,6 @@
             return;
           }
 
-          // Compute Fingerprint of the verified key
           const rawPubBuf = hex2buf(data.rawPublicKey);
           const hashBuf = await crypto.subtle.digest('SHA-256', rawPubBuf);
           const incomingFp = buf2hex(hashBuf);
@@ -554,9 +645,8 @@
           const proceedAccept = async () => {
             TofuManager.savePeer(data.peerId, incomingFp, data.rawPublicKey);
             activeConnections.set(conn.peer, conn);
-            renderConnectedPeers();
+            renderKnownDevicesGrid();
 
-            // Respond with mutual authentication signature
             const responseNonce = data.nonce + '::ack';
             const mySig = await signChallenge(responseNonce);
 
@@ -593,7 +683,6 @@
             return;
           }
 
-          // Verify Responder Signature
           const rawPubBuf = hex2buf(data.rawPublicKey);
           const hashBuf = await crypto.subtle.digest('SHA-256', rawPubBuf);
           const incomingFp = buf2hex(hashBuf);
@@ -603,7 +692,7 @@
           const finalizeConnection = () => {
             TofuManager.savePeer(data.peerId, incomingFp, data.rawPublicKey);
             activeConnections.set(conn.peer, conn);
-            renderConnectedPeers();
+            renderKnownDevicesGrid();
             updateStatusBadge('ready', `متصل مع: ${conn.peer}`);
           };
 
@@ -621,23 +710,22 @@
           return;
         }
 
-        // Must be authenticated before handling file data
+        // Security checkpoint
         if (!activeConnections.has(conn.peer)) {
           console.warn('Blocked unauthorized payload from:', conn.peer);
           return;
         }
 
-        // 3. File Start Packet (Disk Streaming on supported desktop, In-Memory on mobile)
+        // 3. File Start Packet (Disk Streaming on PC when supported, otherwise In-Memory buffer)
         if (data.type === 'FILE_START') {
           let writableStream = null;
 
-          // Attempt Disk Streaming if supported and allowed
           if ('showSaveFilePicker' in window && data.size > 200 * 1024 * 1024) {
             try {
               const handle = await window.showSaveFilePicker({ suggestedName: data.name });
               writableStream = await handle.createWritable();
             } catch (err) {
-              console.warn('Disk streaming skipped/cancelled by user, using memory buffer:', err);
+              console.warn('Disk streaming skipped/cancelled, fallback to memory buffer:', err);
             }
           }
 
@@ -680,36 +768,61 @@
           return;
         }
 
-        // 5. File End Packet (Guaranteed Manual Action for Safari & iPadOS)
+        // 5. File End Packet (Guaranteed original filename preservation)
         if (data.type === 'FILE_END') {
           const fileState = incomingFileBuffers.get(data.fileId);
           if (!fileState) return;
 
+          const originalFileName = fileState.meta.name; // Exactly identical to what sender selected
+
           if (fileState.writableStream) {
             await fileState.writableStream.close();
-            completeTransferUi(data.fileId, true, null, fileState.meta.name);
+            completeTransferUi(data.fileId, true, null, originalFileName);
           } else {
             const blob = new Blob(fileState.chunks, { type: fileState.meta.mime || 'application/octet-stream' });
+            
+            // Try automatic download with original name
+            triggerBrowserDownload(blob, originalFileName);
+
+            // Also provide instant manual button for Safari/iPadOS
             const downloadUrl = URL.createObjectURL(blob);
-            completeTransferUi(data.fileId, true, downloadUrl, fileState.meta.name);
+            completeTransferUi(data.fileId, true, downloadUrl, originalFileName);
           }
 
           incomingFileBuffers.delete(data.fileId);
-          addHistoryItem(fileState.meta.name, fileState.meta.size, conn.peer, 'download');
+          addHistoryItem(originalFileName, fileState.meta.size, conn.peer, 'download');
         }
       });
 
       conn.on('close', () => {
         activeConnections.delete(conn.peer);
-        renderConnectedPeers();
+        renderKnownDevicesGrid();
         updateStatusBadge('ready', 'جاهز للاقتران والتبادل');
       });
 
       conn.on('error', (e) => {
         console.error('Conn error:', e);
         activeConnections.delete(conn.peer);
-        renderConnectedPeers();
+        renderKnownDevicesGrid();
       });
+    }
+
+    function triggerBrowserDownload(blob, originalFileName) {
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.style.display = 'none';
+        a.href = url;
+        a.download = originalFileName; // Force exact filename
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 2000);
+      } catch (e) {
+        console.warn('Auto download blocked:', e);
+      }
     }
 
     function showTofuModal(peerId, fingerprint, isMismatch, callback) {
@@ -728,38 +841,98 @@
       modal.classList.remove('hidden');
     }
 
-    function renderConnectedPeers() {
-      const container = document.getElementById('connectedPeersList');
-      const strip = document.getElementById('connectedPeersStrip');
-
-      if (activeConnections.size === 0) {
-        strip.classList.add('hidden');
-        container.innerHTML = '';
-        return;
-      }
-
-      strip.classList.remove('hidden');
-      container.innerHTML = Array.from(activeConnections.keys()).map(id => `
-        <div class="bg-slate-950 border border-emerald-800/80 rounded-lg px-2.5 py-1 flex items-center gap-2 text-xs">
-          <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-          <span class="mono font-bold text-slate-200">${id}</span>
-          <button onclick="disconnectPeer('${id}')" class="text-slate-500 hover:text-red-400 text-[10px] pr-1">
-            <i class="fa-solid fa-xmark"></i>
-          </button>
-        </div>
-      `).join('');
-    }
-
     function disconnectPeer(peerId) {
       if (activeConnections.has(peerId)) {
         activeConnections.get(peerId).close();
         activeConnections.delete(peerId);
-        renderConnectedPeers();
+        renderKnownDevicesGrid();
       }
     }
 
     // ========================================================
-    // High-Performance Transfer Engine (onbufferedamountlow)
+    // Screen Mirroring System (WebRTC MediaStreams)
+    // ========================================================
+    async function startScreenMirroring() {
+      if (activeConnections.size === 0) {
+        alert('يجب الاتصال بجهاز آخر أولاً لمشاركة الشاشة معه!');
+        return;
+      }
+
+      // Check browser getDisplayMedia support
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        alert('ميزة مشاركة الشاشة (getDisplayMedia) غير مدعومة من هذا المتصفح أو الجهاز.');
+        return;
+      }
+
+      try {
+        localScreenStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            cursor: "always",
+            frameRate: { ideal: 30, max: 60 }
+          },
+          audio: false
+        });
+
+        document.getElementById('btnStartScreenShare').classList.add('hidden');
+        document.getElementById('btnStopScreenShare').classList.remove('hidden');
+        document.getElementById('screenStatusBadge').innerText = 'جاري البث...';
+        document.getElementById('screenStatusBadge').className = 'text-[11px] text-cyan-400 font-bold flex items-center gap-1';
+
+        // Call all connected active peers with the screen stream
+        for (const [peerId, _] of activeConnections) {
+          const call = peer.call(peerId, localScreenStream);
+          activeMediaCalls.set(peerId, call);
+        }
+
+        // Handle user stopping stream from system chrome
+        localScreenStream.getVideoTracks()[0].onended = () => {
+          stopScreenMirroring();
+        };
+
+      } catch (err) {
+        console.error('Failed to capture screen:', err);
+      }
+    }
+
+    function stopScreenMirroring() {
+      if (localScreenStream) {
+        localScreenStream.getTracks().forEach(track => track.stop());
+        localScreenStream = null;
+      }
+
+      for (const [_, call] of activeMediaCalls) {
+        call.close();
+      }
+      activeMediaCalls.clear();
+
+      document.getElementById('btnStartScreenShare').classList.remove('hidden');
+      document.getElementById('btnStopScreenShare').classList.add('hidden');
+      document.getElementById('screenStatusBadge').innerText = 'خامل';
+      document.getElementById('screenStatusBadge').className = 'text-[11px] text-slate-500';
+    }
+
+    function displayRemoteScreen(stream, fromPeer) {
+      const box = document.getElementById('mirrorViewerBox');
+      const video = document.getElementById('mirrorVideo');
+      const tag = document.getElementById('mirrorPeerTag');
+
+      video.srcObject = stream;
+      tag.innerText = `بث شاشة مباشر من: ${fromPeer}`;
+      box.classList.remove('hidden');
+
+      // Scroll smoothly into view
+      box.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+
+    function hideRemoteScreen() {
+      const box = document.getElementById('mirrorViewerBox');
+      const video = document.getElementById('mirrorVideo');
+      video.srcObject = null;
+      box.classList.add('hidden');
+    }
+
+    // ========================================================
+    // High-Performance Transfer Pipeline
     // ========================================================
     async function startSendingFiles() {
       if (selectedFilesToSend.length === 0) return;
@@ -794,19 +967,18 @@
       conn.send({
         type: 'FILE_START',
         fileId: fileId,
-        name: file.name,
+        name: file.name, // Exactly identical filename
         size: totalBytes,
         mime: file.type
       });
 
       const dc = conn.dataChannel;
-      dc.bufferedAmountLowThreshold = 1024 * 1024; // 1 MB Threshold for backpressure
+      dc.bufferedAmountLowThreshold = 1024 * 1024; // 1 MB Threshold
 
       let offset = 0;
       const startTime = performance.now();
 
       while (offset < totalBytes) {
-        // Event-driven backpressure instead of arbitrary setTimeout
         if (dc.bufferedAmount > 4 * 1024 * 1024) {
           await new Promise(resolve => {
             const onLow = () => {
@@ -844,7 +1016,7 @@
     }
 
     // ========================================================
-    // UI Helpers & iPadOS-Compliant Manual Download
+    // UI Helpers & Transfer Rows
     // ========================================================
     function createTransferUiRow({ id, name, totalBytes, direction, peer }) {
       const list = document.getElementById('transfersList');
@@ -903,7 +1075,6 @@
       const speed = document.getElementById(`speed-${id}`);
       if (speed) speed.innerText = success ? 'مكتمل ✅' : 'فشل ❌';
 
-      // Crucial for iPadOS / iOS / Safari: Provide explicit user-driven download button
       if (downloadUrl) {
         const actionBox = document.getElementById(`actionContainer-${id}`);
         if (actionBox) {
@@ -911,7 +1082,7 @@
           actionBox.innerHTML = `
             <a href="${downloadUrl}" download="${fileName}" 
                class="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition flex items-center gap-1.5 shadow-lg shadow-emerald-600/20">
-              <i class="fa-solid fa-download"></i> حفظ الملف على الجهاز
+              <i class="fa-solid fa-download"></i> حفظ الملف باسم: (${fileName})
             </a>
           `;
         }
@@ -942,18 +1113,19 @@
     }
 
     // ========================================================
-    // Initialization & Event Binding
+    // Initialization & Event Listeners
     // ========================================================
     document.addEventListener('DOMContentLoaded', async () => {
-      renderTofuList();
-
-      // 1. Initialize ECDSA Keys
       await initCryptoIdentity();
-
-      // 2. Initialize PeerJS with stored or custom ID
       await initPeer();
+      renderKnownDevicesGrid();
 
-      // Toggle More Options
+      // Screen Mirroring Buttons
+      document.getElementById('btnStartScreenShare').addEventListener('click', startScreenMirroring);
+      document.getElementById('btnStopScreenShare').addEventListener('click', stopScreenMirroring);
+      document.getElementById('btnCloseViewer').addEventListener('click', hideRemoteScreen);
+
+      // Accordion Toggle
       const btnToggle = document.getElementById('toggleMoreOptions');
       const contentMore = document.getElementById('moreOptionsContent');
       const chevron = document.getElementById('moreOptionsChevron');
@@ -975,15 +1147,15 @@
         alert('تم نسخ المعرّف (Peer ID) إلى الحافظة!');
       });
 
-      // Connect Action
+      // Connect Button
       document.getElementById('btnConnect').addEventListener('click', () => {
         const target = document.getElementById('remotePeerIdInput').value.trim();
         connectToRemotePeer(target);
       });
 
-      // Clear TOFU
+      // Clear TOFU Registry
       document.getElementById('btnClearTofu').addEventListener('click', () => {
-        if (confirm('هل أنت متأكد من مسح جميع الأجهزة الموثوقة؟')) {
+        if (confirm('هل أنت متأكد من مسح جميع الأجهزة المحفوظة؟')) {
           TofuManager.clearAll();
         }
       });
@@ -998,7 +1170,7 @@
         if (pendingTofuDecision) pendingTofuDecision(false);
       });
 
-      // Drag & Drop & File Select
+      // File Selection & Drag-Drop
       const dropZone = document.getElementById('dropZone');
       const fileInput = document.getElementById('fileInput');
 
