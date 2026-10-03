@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DevicesManager Web</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        deepPurple: {
+                            800: '#4c1d95',
+                            900: '#312e81',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- PeerJS for WebRTC P2P connection -->
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <style>
+        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        .glass-panel { background: rgba(255, 255, 255, 0.05); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); }
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4c1d95; border-radius: 4px; }
+    </style>
+</head>
+<body class="min-h-screen flex flex-col items-center py-8 px-4">
+
+    <!-- Header -->
+    <div class="w-full max-w-4xl flex items-center justify-between mb-8">
+        <h1 class="text-3xl font-bold flex items-center gap-3">
+            <i class="fa-solid fa-network-wired text-purple-500"></i>
+            DevicesManager <span class="text-sm font-normal bg-purple-600 px-2 py-1 rounded text-white ml-2">Web Edition</span>
+        </h1>
+        <div id="connectionStatus" class="flex items-center gap-2 text-sm">
+            <span class="relative flex h-3 w-3">
+              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" id="statusPing"></span>
+              <span class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500" id="statusDot"></span>
+            </span>
+            <span id="statusText" class="text-gray-400">Connecting to global server...</span>
+        </div>
+    </div>
+
+    <div class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6">
+        
+        <!-- Left Column: Identity & Connection -->
+        <div class="space-y-6">
+            <!-- My Device -->
+            <div class="glass-panel p-6 shadow-lg">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-laptop text-blue-400"></i> My Device Identity</h2>
+                <p class="text-sm text-gray-400 mb-2">Share this ID with anyone in the world to let them connect to you.</p>
+                <div class="flex items-center gap-2">
+                    <input type="text" id="myPeerId" readonly class="w-full bg-black/30 border border-gray-600 rounded p-2 text-green-400 font-mono focus:outline-none" value="Generating...">
+                    <button onclick="copyMyId()" class="bg-gray-700 hover:bg-gray-600 p-2 rounded transition" title="Copy ID">
+                        <i class="fa-solid fa-copy"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Connect to Peer -->
+            <div class="glass-panel p-6 shadow-lg">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-link text-green-400"></i> Connect to Peer</h2>
+                <p class="text-sm text-gray-400 mb-2">Enter the ID of the device you want to connect to.</p>
+                <div class="flex flex-col gap-3">
+                    <input type="text" id="targetPeerId" placeholder="Paste remote Peer ID here" class="w-full bg-black/30 border border-gray-600 rounded p-2 text-white font-mono focus:border-purple-500 focus:outline-none transition">
+                    <button id="connectBtn" onclick="connectToPeer()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded transition flex justify-center items-center gap-2">
+                        <i class="fa-solid fa-plug"></i> Connect
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Connected Peers List -->
+            <div class="glass-panel p-6 shadow-lg hidden" id="connectedPeersPanel">
+                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-users text-purple-400"></i> Connected Devices</h2>
+                <ul id="connectedPeersList" class="space-y-2">
+                    <!-- Dynamic List -->
+                </ul>
+            </div>
+        </div>
+
+        <!-- Right Column: Transfers & History -->
+        <div class="glass-panel p-6 shadow-lg flex flex-col h-[600px]">
+            <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-file-export text-orange-400"></i> Send File</h2>
+            
+            <!-- File Input (Disabled until connected) -->
+            <div class="mb-6 relative">
+                <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
+                <label for="fileInput" id="fileInputLabel" class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-600 rounded-lg cursor-not-allowed bg-black/20 text-gray-500 transition-colors">
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
+                    <span class="text-sm font-semibold">Connect to a peer first to send files</span>
+                </label>
+            </div>
+
+            <h2 class="text-lg font-bold mb-4 border-t border-gray-700 pt-4 flex items-center gap-2"><i class="fa-solid fa-download text-teal-400"></i> Transfers & Downloads</h2>
+            
+            <!-- Transfer Queue/History -->
+            <div id="transferContainer" class="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
+                <div class="text-center text-gray-500 text-sm mt-10">No active transfers.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Application Logic -->
+    <script>
+        const CHUNK_SIZE = 64 * 1024; // 64 KB chunks for stability over WebRTC
+        let peer = null;
+        let connections = {}; // remotePeerId -> DataConnection
+        let activeTransfers = {}; // fileId -> state
+        
+        // UI Elements
+        const statusDot = document.getElementById('statusDot');
+        const statusPing = document.getElementById('statusPing');
+        const statusText = document.getElementById('statusText');
+        const myPeerIdInput = document.getElementById('myPeerId');
+        const targetPeerIdInput = document.getElementById('targetPeerId');
+        const fileInput = document.getElementById('fileInput');
+        const fileInputLabel = document.getElementById('fileInputLabel');
+        const connectedPeersPanel = document.getElementById('connectedPeersPanel');
+        const connectedPeersList = document.getElementById('connectedPeersList');
+        const transferContainer = document.getElementById('transferContainer');
+        const connectBtn = document.getElementById('connectBtn');
+
+        // Utilities
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const k = 1024;
+            const sizes = ['B', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+
+        function generateFileId() {
+            return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        }
+
+        function copyMyId() {
+            navigator.clipboard.writeText(myPeerIdInput.value);
+            const btn = myPeerIdInput.nextElementSibling;
+            const originalHTML = btn.innerHTML;
+            btn.innerHTML = '<i class="fa-solid fa-check text-green-400"></i>';
+            setTimeout(() => btn.innerHTML = originalHTML, 1500);
+        }
+
+        function setNetworkStatus(status, text) {
+            statusText.innerText = text;
+            statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75";
+            if(status === 'connecting') {
+                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-yellow-500";
+                statusPing.classList.add("bg-yellow-400");
+            } else if (status === 'connected') {
+                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-green-500";
+                statusPing.classList.add("bg-green-400");
+                statusPing.classList.remove("animate-ping"); // stop pinging once connected to signaling
+            } else {
+                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-red-500";
+                statusPing.classList.remove("animate-ping");
+            }
+        }
+
+        // Initialize PeerJS (Connects to public signaling server)
+        function initPeer() {
+            setNetworkStatus('connecting', 'Connecting to signaling server...');
+            
+            // Generate a local ID to prevent server-side ID assignment timeouts/errors
+            const localId = 'dm-' + Math.random().toString(36).substr(2, 9);
+
+            // Using default PeerJS cloud server for discovery with updated ICE config
+            peer = new Peer(localId, {
+                debug: 1,
+                config: {'iceServers': [
+                    { urls: 'stun:stun.l.google.com:19302' },
+                    { urls: 'stun:stun1.l.google.com:19302' }
+                ]}
+            });
+
+            peer.on('open', (id) => {
+                myPeerIdInput.value = id;
+                setNetworkStatus('connected', 'Online & Ready');
+            });
+
+            peer.on('connection', (conn) => {
+                setupConnectionHandlers(conn);
+            });
+
+            peer.on('disconnected', () => {
+                setNetworkStatus('connecting', 'Reconnecting...');
+                peer.reconnect();
+            });
+
+            peer.on('error', (err) => {
+                console.error("PeerJS Error:", err);
+                const errorMsg = err.type === 'server-error' ? 'Server Overloaded' : 'Network Error';
+                setNetworkStatus('error', errorMsg);
+                
+                // Auto-restart on fatal server errors
+                if (err.type === 'unavailable-id' || err.type === 'server-error' || err.type === 'network') {
+                    setTimeout(() => {
+                        if (!peer || peer.destroyed || peer.disconnected) {
+                           peer.destroy();
+                           initPeer();
+                        }
+                    }, 5000);
+                }
+            });
+        }
+
+        // Initiate connection to remote peer
+        function connectToPeer() {
+            const targetId = targetPeerIdInput.value.trim();
+            if (!targetId || targetId === peer.id) return;
+            
+            connectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...';
+            connectBtn.disabled = true;
+
+            const conn = peer.connect(targetId, { reliable: true });
+            setupConnectionHandlers(conn);
+        }
+
+        // Handle Connection Events
+        function setupConnectionHandlers(conn) {
+            conn.on('open', () => {
+                connections[conn.peer] = conn;
+                updateUIForConnection(conn.peer);
+                
+                // Reset connect button
+                connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
+                connectBtn.disabled = false;
+                targetPeerIdInput.value = '';
+            });
+
+            conn.on('data', (data) => {
+                handleIncomingData(conn.peer, data);
+            });
+
+            conn.on('close', () => {
+                delete connections[conn.peer];
+                updateUIForDisconnect(conn.peer);
+            });
+
+            conn.on('error', (err) => {
+                console.error("Connection error:", err);
+                connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
+                connectBtn.disabled = false;
+            });
+        }
+
+        function updateUIForConnection(peerId) {
+            connectedPeersPanel.classList.remove('hidden');
+            if(!document.getElementById(`peer-${peerId}`)) {
+                const li = document.createElement('li');
+                li.id = `peer-${peerId}`;
+                li.className = "flex items-center justify-between bg-black/30 p-2 rounded border border-gray-700";
+                li.innerHTML = `
+                    <span class="font-mono text-sm text-green-300 truncate"><i class="fa-solid fa-link mr-2"></i>${peerId}</span>
+                    <span class="text-xs bg-green-900 text-green-300 px-2 py-1 rounded">Connected</span>
+                `;
+                connectedPeersList.appendChild(li);
+            }
+
+            // Enable file input
+            fileInput.disabled = false;
+            fileInputLabel.className = "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-purple-500 rounded-lg cursor-pointer bg-purple-900/20 text-purple-300 hover:bg-purple-900/40 transition-colors";
+            fileInputLabel.innerHTML = `
+                <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
+                <span class="text-sm font-semibold">Click to select file for transfer</span>
+                <span class="text-xs text-gray-400 mt-1">Sends to all connected peers</span>
+            `;
+        }
+
+        function updateUIForDisconnect(peerId) {
+            const el = document.getElementById(`peer-${peerId}`);
+            if(el) el.remove();
+            
+            if(Object.keys(connections).length === 0) {
+                connectedPeersPanel.classList.add('hidden');
+                fileInput.disabled = true;
+                fileInputLabel.className = "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-600 rounded-lg cursor-not-allowed bg-black/20 text-gray-500 transition-colors";
+                fileInputLabel.innerHTML = `
+                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
+                    <span class="text-sm font-semibold">Connect to a peer first to send files</span>
+                `;
+            }
+        }
+
+        // ================== FILE TRANSFER PROTOCOL ==================
+
+        // 1. Sending
+        async function handleFileSelect(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            
+            if(Object.keys(connections).length === 0) {
+                console.warn("No active connections.");
+                fileInput.value = '';
+                return;
+            }
+
+            const fileId = generateFileId();
+            
+            // Create UI for sending
+            createTransferUI(fileId, file.name, file.size, 'Sending', 'up');
+
+            for (const peerId in connections) {
+                const conn = connections[peerId];
+                sendFile(conn, file, fileId);
+            }
+            
+            fileInput.value = ''; // Reset input
+        }
+
+        async function sendFile(conn, file, fileId) {
+            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+            let offset = 0;
+            
+            // Send Header
+            conn.send({
+                type: 'header',
+                fileId: fileId,
+                name: file.name,
+                size: file.size,
+                mime: file.type,
+                totalChunks: totalChunks
+            });
+
+            const startTime = Date.now();
+            let lastUpdate = startTime;
+
+            for (let i = 0; i < totalChunks; i++) {
+                const chunk = file.slice(offset, offset + CHUNK_SIZE);
+                const buffer = await chunk.arrayBuffer();
+                
+                conn.send({
+                    type: 'chunk',
+                    fileId: fileId,
+                    index: i,
+                    data: buffer
+                });
+                
+                offset += CHUNK_SIZE;
+
+                // Update UI Progress smoothly
+                const now = Date.now();
+                if (now - lastUpdate > 100 || i === totalChunks - 1) {
+                    const speed = (offset / (1024 * 1024)) / ((now - startTime) / 1000);
+                    updateTransferUI(fileId, offset, file.size, speed);
+                    lastUpdate = now;
+                }
+                
+                // Small sleep to prevent overwhelming WebRTC buffer
+                if (i % 10 === 0) await new Promise(r => setTimeout(r, 10)); 
+            }
+
+            // Send EOF
+            conn.send({ type: 'eof', fileId: fileId });
+            completeTransferUI(fileId, true);
+        }
+
+        // 2. Receiving
+        function handleIncomingData(peerId, msg) {
+            if (msg.type === 'header') {
+                activeTransfers[msg.fileId] = {
+                    name: msg.name,
+                    size: msg.size,
+                    mime: msg.mime,
+                    totalChunks: msg.totalChunks,
+                    receivedChunks: 0,
+                    buffers: [],
+                    startTime: Date.now(),
+                    lastUpdate: Date.now()
+                };
+                
+                if(transferContainer.innerText.includes("No active")) transferContainer.innerHTML = '';
+                createTransferUI(msg.fileId, msg.name, msg.size, `Receiving from ${peerId}`, 'down');
+            } 
+            else if (msg.type === 'chunk') {
+                const transfer = activeTransfers[msg.fileId];
+                if (!transfer) return;
+
+                transfer.buffers.push(msg.data);
+                transfer.receivedChunks++;
+                
+                const bytesReceived = transfer.receivedChunks * CHUNK_SIZE;
+                const now = Date.now();
+                
+                if (now - transfer.lastUpdate > 100 || transfer.receivedChunks === transfer.totalChunks) {
+                    const speed = (bytesReceived / (1024 * 1024)) / ((now - transfer.startTime) / 1000);
+                    updateTransferUI(msg.fileId, Math.min(bytesReceived, transfer.size), transfer.size, speed);
+                    transfer.lastUpdate = now;
+                }
+            }
+            else if (msg.type === 'eof') {
+                const transfer = activeTransfers[msg.fileId];
+                if (!transfer) return;
+
+                completeTransferUI(msg.fileId, false, transfer);
+            }
+        }
+
+        // ================== UI FOR TRANSFERS ==================
+
+        function createTransferUI(id, filename, size, contextText, direction) {
+            if(transferContainer.innerText.includes("No active")) transferContainer.innerHTML = '';
+            
+            const icon = direction === 'up' ? 'fa-arrow-up text-orange-400' : 'fa-arrow-down text-teal-400';
+            
+            const div = document.createElement('div');
+            div.id = `transfer-${id}`;
+            div.className = "bg-black/30 p-4 rounded-lg border border-gray-700 relative overflow-hidden";
+            div.innerHTML = `
+                <div class="flex justify-between items-start mb-2 relative z-10">
+                    <div class="truncate max-w-[70%]">
+                        <span class="font-bold block truncate">${filename}</span>
+                        <span class="text-xs text-gray-400"><i class="fa-solid ${icon} mr-1"></i> ${contextText}</span>
+                    </div>
+                    <div class="text-right">
+                        <span class="text-xs font-mono text-purple-300 block" id="progressText-${id}">0%</span>
+                        <span class="text-xs text-gray-500" id="speedText-${id}">0 MB/s</span>
+                    </div>
+                </div>
+                <!-- Progress Bar -->
+                <div class="w-full bg-gray-800 rounded-full h-1.5 mb-1 relative z-10">
+                    <div class="bg-purple-600 h-1.5 rounded-full transition-all duration-100" style="width: 0%" id="progressBar-${id}"></div>
+                </div>
+                <div class="text-xs text-gray-400 text-right w-full" id="bytesText-${id}">0 / ${formatBytes(size)}</div>
+                
+                <!-- Action Area (hidden until complete) -->
+                <div id="actionArea-${id}" class="mt-3 hidden relative z-10"></div>
+            `;
+            transferContainer.prepend(div);
+        }
+
+        function updateTransferUI(id, current, total, speed) {
+            const progress = (current / total) * 100;
+            const bar = document.getElementById(`progressBar-${id}`);
+            const pText = document.getElementById(`progressText-${id}`);
+            const sText = document.getElementById(`speedText-${id}`);
+            const bText = document.getElementById(`bytesText-${id}`);
+
+            if (bar) bar.style.width = `${progress}%`;
+            if (pText) pText.innerText = `${progress.toFixed(1)}%`;
+            if (sText) sText.innerText = `${speed.toFixed(2)} MB/s`;
+            if (bText) bText.innerText = `${formatBytes(current)} / ${formatBytes(total)}`;
+        }
+
+        function completeTransferUI(id, isSender, transferData = null) {
+            const pText = document.getElementById(`progressText-${id}`);
+            const sText = document.getElementById(`speedText-${id}`);
+            const bar = document.getElementById(`progressBar-${id}`);
+            const actionArea = document.getElementById(`actionArea-${id}`);
+            const card = document.getElementById(`transfer-${id}`);
+
+            if (pText) pText.innerText = "100%";
+            if (sText) sText.innerText = "Complete";
+            if (bar) {
+                bar.style.width = "100%";
+                bar.classList.replace('bg-purple-600', 'bg-green-500');
+            }
+            if(card) card.classList.replace('border-gray-700', 'border-green-800');
+
+            if (actionArea) {
+                actionArea.classList.remove('hidden');
+                
+                if (isSender) {
+                    actionArea.innerHTML = `<span class="text-sm text-green-400"><i class="fa-solid fa-check-circle mr-1"></i> Sent successfully</span>`;
+                } else if (transferData) {
+                    // Receiver: Combine buffers and offer download
+                    const blob = new Blob(transferData.buffers, { type: transferData.mime });
+                    const url = URL.createObjectURL(blob);
+                    
+                    actionArea.innerHTML = `
+                        <a href="${url}" download="${transferData.name}" class="bg-teal-600 hover:bg-teal-500 text-white text-sm py-1.5 px-4 rounded inline-flex items-center gap-2 transition">
+                            <i class="fa-solid fa-floppy-disk"></i> Save File
+                        </a>
+                    `;
+                    
+                    // Cleanup memory after a while if desired, but user needs to click link first.
+                    delete activeTransfers[id];
+                }
+            }
+        }
+
+        // Start App
+        window.addEventListener('load', initPeer);
+
+    </script>
+</body>
+</html>
