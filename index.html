@@ -1,495 +1,1023 @@
 <!DOCTYPE html>
-<html lang="en" class="dark">
+<html lang="ar" dir="rtl">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DevicesManager Web</title>
-    <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script>
-        tailwind.config = {
-            darkMode: 'class',
-            theme: {
-                extend: {
-                    colors: {
-                        deepPurple: {
-                            800: '#4c1d95',
-                            900: '#312e81',
-                        }
-                    }
-                }
-            }
-        }
-    </script>
-    <!-- FontAwesome for Icons -->
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- PeerJS for WebRTC P2P connection -->
-    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
-    <style>
-        body { background-color: #121212; color: #e0e0e0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        .glass-panel { background: rgba(255, 255, 255, 0.05); border-radius: 12px; border: 1px solid rgba(255, 255, 255, 0.1); }
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: #4c1d95; border-radius: 4px; }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevicesManager Web - P2P File Transfer</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
+    body { font-family: 'Tajawal', sans-serif; }
+    .mono { font-family: 'JetBrains Mono', monospace; direction: ltr; text-align: left; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: #0f172a; }
+    ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+    ::-webkit-scrollbar-thumb:hover { background: #475569; }
+  </style>
 </head>
-<body class="min-h-screen flex flex-col items-center py-8 px-4">
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col antialiased selection:bg-purple-600 selection:text-white">
 
-    <!-- Header -->
-    <div class="w-full max-w-4xl flex items-center justify-between mb-8">
-        <h1 class="text-3xl font-bold flex items-center gap-3">
-            <i class="fa-solid fa-network-wired text-purple-500"></i>
-            DevicesManager <span class="text-sm font-normal bg-purple-600 px-2 py-1 rounded text-white ml-2">Web Edition</span>
-        </h1>
-        <div id="connectionStatus" class="flex items-center gap-2 text-sm">
-            <span class="relative flex h-3 w-3">
-              <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75" id="statusPing"></span>
-              <span class="relative inline-flex rounded-full h-3 w-3 bg-yellow-500" id="statusDot"></span>
-            </span>
-            <span id="statusText" class="text-gray-400">Connecting to global server...</span>
+  <!-- Navbar -->
+  <header class="border-b border-slate-800 bg-slate-900/60 backdrop-blur sticky top-0 z-40">
+    <div class="max-w-6xl mx-auto px-4 h-16 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-purple-500/20">
+          <i class="fa-solid fa-network-wired text-white text-lg"></i>
         </div>
+        <div>
+          <h1 class="font-bold text-lg tracking-wide text-white flex items-center gap-2">
+            DevicesManager <span class="text-xs bg-purple-500/20 text-purple-300 border border-purple-500/30 px-2 py-0.5 rounded-full">Web Edition</span>
+          </h1>
+          <p class="text-xs text-slate-400">P2P File Transfer • E2E Encrypted • TOFU Security</p>
+        </div>
+      </div>
+      <div id="connectionStatusBadge" class="flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-slate-800 border border-slate-700 text-slate-300">
+        <span class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+        <span id="connectionStatusText">جاري تهيئة الهوية...</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Container -->
+  <main class="max-w-6xl mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 flex-1 w-full">
+
+    <!-- Left Column: Identity & Connection (5 Cols) -->
+    <div class="lg:col-span-5 space-y-6">
+      
+      <!-- My Identity Card -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl relative overflow-hidden">
+        <div class="absolute -right-10 -top-10 w-32 h-32 bg-purple-500/10 rounded-full blur-2xl pointer-events-none"></div>
+        <h2 class="text-base font-bold text-purple-300 flex items-center gap-2 mb-4">
+          <i class="fa-solid fa-fingerprint"></i> هويتي ومعرف الجهاز
+        </h2>
+
+        <div class="space-y-4">
+          <!-- Custom ID Input -->
+          <div>
+            <label class="text-xs text-slate-400 block mb-1.5 font-medium">الـ ID المخصص (Custom Peer ID):</label>
+            <div class="flex gap-2">
+              <input type="text" id="myCustomIdInput" placeholder="مثال: pc-office, my-desktop..." 
+                class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-purple-200 mono focus:outline-none focus:border-purple-500 focus:ring-1 focus:ring-purple-500 transition">
+              <button id="btnSetCustomId" class="px-3 py-2 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5">
+                <i class="fa-solid fa-floppy-disk"></i> تعيين
+              </button>
+            </div>
+            <p class="text-[11px] text-slate-500 mt-1">يُسمح بالأحرف والأرقام وشرطة (-). سيُعاد الاتصال فور تغييره.</p>
+          </div>
+
+          <!-- Active ID & Fingerprint Info -->
+          <div class="bg-slate-950/70 border border-slate-800/80 rounded-xl p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-slate-400">الـ ID النشط حالياً:</span>
+              <button id="btnCopyMyId" class="text-xs text-purple-400 hover:text-purple-300 transition flex items-center gap-1">
+                <i class="fa-regular fa-copy"></i> نسخ
+              </button>
+            </div>
+            <div id="myActiveId" class="mono text-sm font-semibold text-slate-200 truncate">---</div>
+            
+            <div class="pt-2 border-t border-slate-800/60 flex items-center justify-between">
+              <span class="text-xs text-slate-400">بصمة جهازي (Fingerprint):</span>
+            </div>
+            <div id="myFingerprint" class="mono text-[11px] text-emerald-400 truncate">---</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Remote Peer Connection Card -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <h2 class="text-base font-bold text-indigo-300 flex items-center gap-2 mb-4">
+          <i class="fa-solid fa-link"></i> الاتصال بجهاز آخر
+        </h2>
+
+        <div class="space-y-4">
+          <div>
+            <label class="text-xs text-slate-400 block mb-1.5 font-medium">أدخل معرّف الجهاز البعيد (Remote Peer ID):</label>
+            <div class="flex gap-2">
+              <input type="text" id="remotePeerIdInput" placeholder="الصق معرّف الجهاز الآخر هنا..." 
+                class="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-sm text-indigo-200 mono focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 transition">
+              <button id="btnConnect" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold transition flex items-center gap-1.5">
+                <i class="fa-solid fa-bolt"></i> اتصال
+              </button>
+            </div>
+          </div>
+
+          <!-- Connected Peers List -->
+          <div>
+            <div class="flex items-center justify-between mb-2">
+              <span class="text-xs font-bold text-slate-300">الأجهزة المتصلة حالياً:</span>
+              <span id="connectedCount" class="text-xs px-2 py-0.5 bg-slate-800 rounded-full text-slate-400">0</span>
+            </div>
+            <div id="connectedPeersList" class="space-y-2 max-h-40 overflow-y-auto pr-1">
+              <div class="text-center py-4 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+                لا يوجد أجهزة متصلة بعد
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Known Peers (TOFU Storage) -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-base font-bold text-slate-300 flex items-center gap-2">
+            <i class="fa-solid fa-shield-halved text-emerald-400"></i> الأجهزة الموثوقة (TOFU)
+          </h2>
+          <button id="btnClearTofu" class="text-xs text-red-400 hover:text-red-300 transition">مسح السجل</button>
+        </div>
+        <p class="text-xs text-slate-400 mb-3">تطبيق مبدأ <span class="text-emerald-400 font-mono">Trust On First Use</span> لمطابقة بصمة التشفير وتفادي هجمات Man-in-the-middle.</p>
+        <div id="tofuList" class="space-y-2 max-h-48 overflow-y-auto pr-1">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
     </div>
 
-    <div class="w-full max-w-4xl grid grid-cols-1 md:grid-cols-2 gap-6">
-        
-        <!-- Left Column: Identity & Connection -->
-        <div class="space-y-6">
-            <!-- My Device -->
-            <div class="glass-panel p-6 shadow-lg">
-                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-laptop text-blue-400"></i> My Device Identity</h2>
-                <p class="text-sm text-gray-400 mb-2">Share this ID with anyone in the world to let them connect to you.</p>
-                <div class="flex items-center gap-2">
-                    <input type="text" id="myPeerId" readonly class="w-full bg-black/30 border border-gray-600 rounded p-2 text-green-400 font-mono focus:outline-none" value="Generating...">
-                    <button onclick="copyMyId()" class="bg-gray-700 hover:bg-gray-600 p-2 rounded transition" title="Copy ID">
-                        <i class="fa-solid fa-copy"></i>
-                    </button>
-                </div>
-            </div>
+    <!-- Right Column: Multi-File Transfer & Queue (7 Cols) -->
+    <div class="lg:col-span-7 space-y-6">
 
-            <!-- Connect to Peer -->
-            <div class="glass-panel p-6 shadow-lg">
-                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-link text-green-400"></i> Connect to Peer</h2>
-                <p class="text-sm text-gray-400 mb-2">Enter the ID of the device you want to connect to.</p>
-                <div class="flex flex-col gap-3">
-                    <input type="text" id="targetPeerId" placeholder="Paste remote Peer ID here" class="w-full bg-black/30 border border-gray-600 rounded p-2 text-white font-mono focus:border-purple-500 focus:outline-none transition">
-                    <button id="connectBtn" onclick="connectToPeer()" class="w-full bg-purple-600 hover:bg-purple-500 text-white font-bold py-2 px-4 rounded transition flex justify-center items-center gap-2">
-                        <i class="fa-solid fa-plug"></i> Connect
-                    </button>
-                </div>
-            </div>
-            
-            <!-- Connected Peers List -->
-            <div class="glass-panel p-6 shadow-lg hidden" id="connectedPeersPanel">
-                <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-users text-purple-400"></i> Connected Devices</h2>
-                <ul id="connectedPeersList" class="space-y-2">
-                    <!-- Dynamic List -->
-                </ul>
-            </div>
+      <!-- Transfer Config & Dropzone -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-white flex items-center gap-2">
+            <i class="fa-solid fa-paper-plane text-purple-400"></i> إرسال وتبادل الملفات
+          </h2>
+          
+          <!-- Download Location Prompt Toggle -->
+          <label class="flex items-center gap-2 cursor-pointer bg-slate-950 border border-slate-800 px-3 py-1.5 rounded-xl hover:border-slate-700 transition">
+            <input type="checkbox" id="promptSaveDir" class="rounded text-purple-600 focus:ring-0 bg-slate-900 border-slate-700" checked>
+            <span class="text-xs text-slate-300 select-none">طلب تحديد مكان الحفظ لكل ملف تلقائياً</span>
+          </label>
         </div>
 
-        <!-- Right Column: Transfers & History -->
-        <div class="glass-panel p-6 shadow-lg flex flex-col h-[600px]">
-            <h2 class="text-lg font-bold mb-4 flex items-center gap-2"><i class="fa-solid fa-file-export text-orange-400"></i> Send File</h2>
-            
-            <!-- File Input (Disabled until connected) -->
-            <div class="mb-6 relative">
-                <input type="file" id="fileInput" class="hidden" onchange="handleFileSelect(event)">
-                <label for="fileInput" id="fileInputLabel" class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-600 rounded-lg cursor-not-allowed bg-black/20 text-gray-500 transition-colors">
-                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
-                    <span class="text-sm font-semibold">Connect to a peer first to send files</span>
-                </label>
-            </div>
-
-            <h2 class="text-lg font-bold mb-4 border-t border-gray-700 pt-4 flex items-center gap-2"><i class="fa-solid fa-download text-teal-400"></i> Transfers & Downloads</h2>
-            
-            <!-- Transfer Queue/History -->
-            <div id="transferContainer" class="flex-1 overflow-y-auto custom-scrollbar space-y-3 pr-2">
-                <div class="text-center text-gray-500 text-sm mt-10">No active transfers.</div>
-            </div>
+        <!-- Drag & Drop Zone -->
+        <div id="dropZone" class="border-2 border-dashed border-slate-700 hover:border-purple-500 rounded-2xl p-6 text-center cursor-pointer transition bg-slate-950/40 hover:bg-slate-950/80 group">
+          <input type="file" id="fileInput" multiple class="hidden">
+          <div class="w-12 h-12 mx-auto rounded-full bg-slate-800 group-hover:bg-purple-600/20 group-hover:text-purple-400 flex items-center justify-center text-slate-400 transition mb-3">
+            <i class="fa-solid fa-cloud-arrow-up text-xl"></i>
+          </div>
+          <p class="text-sm font-semibold text-slate-200">اسحب وأفلت الملفات هنا، أو <span class="text-purple-400 underline">تصفح ملفاتك</span></p>
+          <p class="text-xs text-slate-500 mt-1">يدعم إرسال عدة ملفات دفعة واحدة بأي حجم دون حد أقصى</p>
         </div>
+
+        <!-- Selected Files Queue for Sending -->
+        <div id="sendQueueContainer" class="hidden mt-4 pt-4 border-t border-slate-800">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-xs font-bold text-slate-300">الملفات المختارة للإرسال:</span>
+            <span id="sendQueueSummary" class="text-xs text-slate-400">0 ملفات</span>
+          </div>
+          <div id="sendQueueList" class="space-y-1.5 max-h-36 overflow-y-auto mb-4 pr-1"></div>
+          
+          <button id="btnSendFiles" class="w-full py-2.5 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white font-bold rounded-xl text-sm shadow-lg shadow-purple-600/20 transition flex items-center justify-center gap-2">
+            <i class="fa-solid fa-paper-plane"></i> بدء إرسال جميع الملفات المحددة
+          </button>
+        </div>
+      </div>
+
+      <!-- Live Transfers Card -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <h2 class="text-base font-bold text-white flex items-center gap-2 mb-4">
+          <i class="fa-solid fa-arrows-rotate text-emerald-400"></i> عمليات النقل الحالية والنشطة
+        </h2>
+
+        <div id="transfersList" class="space-y-3">
+          <div id="emptyTransfers" class="text-center py-8 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            لا توجد أي عمليات نقل جارية حالياً
+          </div>
+        </div>
+      </div>
+
+      <!-- Completed Transfers History -->
+      <div class="bg-slate-900/80 border border-slate-800 rounded-2xl p-5 shadow-xl">
+        <div class="flex items-center justify-between mb-4">
+          <h2 class="text-base font-bold text-slate-300 flex items-center gap-2">
+            <i class="fa-solid fa-clock-rotate-left text-slate-400"></i> سجل التحميلات والملفات المكتملة
+          </h2>
+          <button id="btnClearHistory" class="text-xs text-slate-500 hover:text-slate-300 transition">مسح السجل</button>
+        </div>
+        <div id="historyList" class="space-y-2 max-h-56 overflow-y-auto pr-1">
+          <div id="emptyHistory" class="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            لم يكتمل نقل أي ملف بعد
+          </div>
+        </div>
+      </div>
+
     </div>
 
-    <!-- Application Logic -->
-    <script>
-        const CHUNK_SIZE = 64 * 1024; // 64 KB chunks for stability over WebRTC
-        let peer = null;
-        let connections = {}; // remotePeerId -> DataConnection
-        let activeTransfers = {}; // fileId -> state
-        
-        // UI Elements
-        const statusDot = document.getElementById('statusDot');
-        const statusPing = document.getElementById('statusPing');
-        const statusText = document.getElementById('statusText');
-        const myPeerIdInput = document.getElementById('myPeerId');
-        const targetPeerIdInput = document.getElementById('targetPeerId');
-        const fileInput = document.getElementById('fileInput');
-        const fileInputLabel = document.getElementById('fileInputLabel');
-        const connectedPeersPanel = document.getElementById('connectedPeersPanel');
-        const connectedPeersList = document.getElementById('connectedPeersList');
-        const transferContainer = document.getElementById('transferContainer');
-        const connectBtn = document.getElementById('connectBtn');
+  </main>
 
-        // Utilities
-        function formatBytes(bytes) {
-            if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
-            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  <!-- TOFU Trust Confirmation Modal -->
+  <div id="tofuModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="bg-slate-900 border border-slate-700 max-w-md w-full rounded-2xl p-6 shadow-2xl space-y-4 animate-in fade-in duration-200">
+      <div class="flex items-center gap-3 text-amber-400">
+        <div class="w-10 h-10 rounded-full bg-amber-400/10 flex items-center justify-center text-xl">
+          <i class="fa-solid fa-triangle-exclamation"></i>
+        </div>
+        <div>
+          <h3 class="font-bold text-white text-base">طلب اقتران جهاز جديد (TOFU)</h3>
+          <p class="text-xs text-slate-400">جهاز يحاول إنشاء اتصال مباشر معك</p>
+        </div>
+      </div>
+
+      <div class="bg-slate-950 border border-slate-800 rounded-xl p-3.5 space-y-2 text-xs">
+        <div class="flex justify-between">
+          <span class="text-slate-400">معرف الجهاز (Peer ID):</span>
+          <span id="modalPeerId" class="mono font-bold text-purple-300">---</span>
+        </div>
+        <div>
+          <span class="text-slate-400 block mb-1">بصمة التشفير (Device Fingerprint):</span>
+          <div id="modalFingerprint" class="mono text-[11px] text-emerald-400 break-all bg-slate-900 p-2 rounded-lg border border-slate-800">---</div>
+        </div>
+      </div>
+
+      <p id="modalWarningText" class="text-xs text-slate-400 leading-relaxed">
+        هل تثق في هذا الجهاز وتقبل تبادل الملفات معه؟ سيتم حفظ بصمته لمنع أي محاولات انتحال مستقبلية.
+      </p>
+
+      <div class="flex gap-3 pt-2">
+        <button id="modalBtnReject" class="flex-1 py-2.5 bg-slate-800 hover:bg-slate-700 text-red-400 rounded-xl text-xs font-bold transition">
+          رفض الاتصال
+        </button>
+        <button id="modalBtnTrust" class="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-xl text-xs font-bold transition">
+          قبول وتوثيق الجهاز
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ==========================================
+    // Core Constants & Cryptographic Helpers
+    // ==========================================
+    const CHUNK_SIZE = 64 * 1024; // 64 KB chunks for safe WebRTC buffering
+    const TOFU_STORAGE_KEY = 'dm_tofu_peers';
+    const MY_ID_STORAGE_KEY = 'dm_my_custom_id';
+    const PROMPT_SAVE_STORAGE_KEY = 'dm_prompt_save_dir';
+
+    // Global App State
+    let peer = null;
+    let myId = '';
+    let myKeyPair = null;
+    let myFingerprint = '';
+    let activeConnections = new Map(); // peerId -> DataConnection
+    let selectedFilesToSend = [];
+    let activeTransfers = new Map(); // transferId -> State
+    let pendingTofuDecision = null;
+
+    // Helper: Format Bytes
+    function formatBytes(bytes) {
+      if (bytes === 0) return '0 B';
+      const k = 1024;
+      const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
+      const i = Math.floor(Math.log(bytes) / Math.log(k));
+      return (bytes / Math.pow(k, i)).toFixed(2) + ' ' + sizes[i];
+    }
+
+    // Helper: SHA-256 for Fingerprint
+    async function computeSha256(dataString) {
+      const encoder = new TextEncoder();
+      const data = encoder.encode(dataString);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    // Helper: Generate or Get Stored Device Fingerprint
+    async function initDeviceFingerprint(id) {
+      let seed = localStorage.getItem('dm_device_seed');
+      if (!seed) {
+        seed = crypto.randomUUID() + '-' + Date.now();
+        localStorage.setItem('dm_device_seed', seed);
+      }
+      return await computeSha256(id + '::' + seed);
+    }
+
+    // ==========================================
+    // TOFU (Trust On First Use) Storage
+    // ==========================================
+    const TofuManager = {
+      getPeers() {
+        try {
+          return JSON.parse(localStorage.getItem(TOFU_STORAGE_KEY)) || {};
+        } catch {
+          return {};
+        }
+      },
+      savePeer(peerId, fingerprint) {
+        const peers = this.getPeers();
+        peers[peerId] = {
+          fingerprint,
+          firstSeen: new Date().toISOString(),
+          trusted: true
+        };
+        localStorage.setItem(TOFU_STORAGE_KEY, JSON.stringify(peers));
+        renderTofuList();
+      },
+      removePeer(peerId) {
+        const peers = this.getPeers();
+        delete peers[peerId];
+        localStorage.setItem(TOFU_STORAGE_KEY, JSON.stringify(peers));
+        renderTofuList();
+      },
+      clearAll() {
+        localStorage.removeItem(TOFU_STORAGE_KEY);
+        renderTofuList();
+      },
+      verify(peerId, incomingFingerprint) {
+        const peers = this.getPeers();
+        if (!peers[peerId]) {
+          return { status: 'NEW' }; // First time seeing this peer
+        }
+        if (peers[peerId].fingerprint === incomingFingerprint) {
+          return { status: 'TRUSTED' };
+        }
+        return { status: 'MISMATCH', stored: peers[peerId].fingerprint }; // Possible MITM
+      }
+    };
+
+    function renderTofuList() {
+      const listContainer = document.getElementById('tofuList');
+      const peers = TofuManager.getPeers();
+      const keys = Object.keys(peers);
+
+      if (keys.length === 0) {
+        listContainer.innerHTML = `
+          <div class="text-center py-4 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            لا توجد أجهزة محفوظة في قائمة الثقة
+          </div>`;
+        return;
+      }
+
+      listContainer.innerHTML = keys.map(id => {
+        const p = peers[id];
+        return `
+          <div class="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 flex items-center justify-between text-xs">
+            <div class="truncate flex-1 pl-2">
+              <div class="flex items-center gap-1.5">
+                <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                <span class="font-bold text-slate-200 mono truncate">${id}</span>
+              </div>
+              <div class="mono text-[10px] text-slate-500 truncate mt-0.5">${p.fingerprint}</div>
+            </div>
+            <button onclick="TofuManager.removePeer('${id}')" class="text-slate-500 hover:text-red-400 p-1 transition" title="إزالة من القائمة الموثوقة">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // ==========================================
+    // PeerJS Connection Management
+    // ==========================================
+    async function initPeer(customId = null) {
+      if (peer) {
+        peer.destroy();
+      }
+
+      const desiredId = customId || localStorage.getItem(MY_ID_STORAGE_KEY) || ('dm-' + Math.random().toString(36).substring(2, 8));
+      myId = desiredId;
+      document.getElementById('myCustomIdInput').value = myId;
+      document.getElementById('myActiveId').innerText = myId;
+
+      myFingerprint = await initDeviceFingerprint(myId);
+      document.getElementById('myFingerprint').innerText = myFingerprint;
+
+      updateStatusBadge('connecting', 'جاري الاتصال بالسيرفر...');
+
+      peer = new Peer(myId, {
+        config: {
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:global.stun.twilio.com:3478' }
+          ]
+        }
+      });
+
+      peer.on('open', (id) => {
+        myId = id;
+        localStorage.setItem(MY_ID_STORAGE_KEY, myId);
+        document.getElementById('myActiveId').innerText = myId;
+        updateStatusBadge('ready', 'جاهز للاتصال والتبادل');
+      });
+
+      peer.on('connection', (conn) => {
+        setupIncomingConnection(conn);
+      });
+
+      peer.on('disconnected', () => {
+        updateStatusBadge('reconnecting', 'انقطع الاتصال، جاري المحاولة...');
+        setTimeout(() => { if (!peer.destroyed) peer.reconnect(); }, 3000);
+      });
+
+      peer.on('error', (err) => {
+        console.error('Peer error:', err);
+        if (err.type === 'unavailable-id') {
+          alert('هذا الـ ID مستخدم حالياً من طرف آخر، يرجى اختيار معرّف مخصص آخر.');
+          updateStatusBadge('error', 'المعرف مكرر أو مستخدم');
+        } else {
+          updateStatusBadge('error', 'خطأ في الاتصال: ' + err.type);
+        }
+      });
+    }
+
+    function updateStatusBadge(state, text) {
+      const badge = document.getElementById('connectionStatusBadge');
+      const textElem = document.getElementById('connectionStatusText');
+      textElem.innerText = text;
+
+      if (state === 'ready') {
+        badge.className = 'flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-emerald-950/60 border border-emerald-800 text-emerald-300';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-emerald-400';
+      } else if (state === 'connecting' || state === 'reconnecting') {
+        badge.className = 'flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-amber-950/60 border border-amber-800 text-amber-300';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-amber-400 animate-pulse';
+      } else {
+        badge.className = 'flex items-center gap-2 text-xs px-3 py-1.5 rounded-full bg-red-950/60 border border-red-800 text-red-300';
+        badge.firstElementChild.className = 'w-2 h-2 rounded-full bg-red-400';
+      }
+    }
+
+    // ==========================================
+    // Connection Handshake & TOFU Logic
+    // ==========================================
+    function connectToRemotePeer(remoteId) {
+      if (!remoteId || remoteId === myId) {
+        alert('يرجى إدخال معرف صحيح ومختلف عن معرف جهازك');
+        return;
+      }
+      if (activeConnections.has(remoteId)) {
+        alert('أنت متصل بالفعل بهذا الجهاز!');
+        return;
+      }
+
+      updateStatusBadge('connecting', `جاري طلب الاقتران بـ ${remoteId}...`);
+      const conn = peer.connect(remoteId, { reliable: true });
+      setupOutgoingConnection(conn);
+    }
+
+    function setupOutgoingConnection(conn) {
+      conn.on('open', () => {
+        // Send our TOFU Handshake
+        conn.send({
+          type: 'HANDSHAKE_REQ',
+          peerId: myId,
+          fingerprint: myFingerprint
+        });
+      });
+
+      attachCommonDataHandlers(conn);
+    }
+
+    function setupIncomingConnection(conn) {
+      attachCommonDataHandlers(conn);
+    }
+
+    function attachCommonDataHandlers(conn) {
+      let incomingFileBuffers = new Map(); // fileId -> { meta, chunks: [], receivedBytes: 0, startTime }
+
+      conn.on('data', async (data) => {
+        // 1. Handshake Request
+        if (data.type === 'HANDSHAKE_REQ') {
+          handleIncomingHandshakeReq(conn, data);
+          return;
         }
 
-        function generateFileId() {
-            return Math.random().toString(36).substr(2, 9) + Date.now().toString(36);
+        // 2. Handshake Response
+        if (data.type === 'HANDSHAKE_RES') {
+          handleIncomingHandshakeRes(conn, data);
+          return;
         }
 
-        function copyMyId() {
-            navigator.clipboard.writeText(myPeerIdInput.value);
-            const btn = myPeerIdInput.nextElementSibling;
-            const originalHTML = btn.innerHTML;
-            btn.innerHTML = '<i class="fa-solid fa-check text-green-400"></i>';
-            setTimeout(() => btn.innerHTML = originalHTML, 1500);
+        // Security check: Must be verified before receiving payload
+        if (!activeConnections.has(conn.peer)) {
+          console.warn('Blocked packet from unverified peer:', conn.peer);
+          return;
         }
 
-        function setNetworkStatus(status, text) {
-            statusText.innerText = text;
-            statusPing.className = "animate-ping absolute inline-flex h-full w-full rounded-full opacity-75";
-            if(status === 'connecting') {
-                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-yellow-500";
-                statusPing.classList.add("bg-yellow-400");
-            } else if (status === 'connected') {
-                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-green-500";
-                statusPing.classList.add("bg-green-400");
-                statusPing.classList.remove("animate-ping"); // stop pinging once connected to signaling
-            } else {
-                statusDot.className = "relative inline-flex rounded-full h-3 w-3 bg-red-500";
-                statusPing.classList.remove("animate-ping");
-            }
+        // 3. File Transfer Start Packet
+        if (data.type === 'FILE_START') {
+          incomingFileBuffers.set(data.fileId, {
+            meta: data,
+            chunks: [],
+            receivedBytes: 0,
+            startTime: performance.now()
+          });
+
+          createTransferUiRow({
+            id: data.fileId,
+            name: data.name,
+            totalBytes: data.size,
+            direction: 'download',
+            peer: conn.peer
+          });
+          return;
         }
 
-        // Initialize PeerJS (Connects to public signaling server)
-        function initPeer() {
-            setNetworkStatus('connecting', 'Connecting to signaling server...');
-            
-            // Generate a local ID to prevent server-side ID assignment timeouts/errors
-            const localId = 'dm-' + Math.random().toString(36).substr(2, 9);
+        // 4. File Transfer Chunk
+        if (data.type === 'FILE_CHUNK') {
+          const fileState = incomingFileBuffers.get(data.fileId);
+          if (!fileState) return;
 
-            // Using default PeerJS cloud server for discovery with updated ICE config
-            peer = new Peer(localId, {
-                debug: 1,
-                config: {'iceServers': [
-                    { urls: 'stun:stun.l.google.com:19302' },
-                    { urls: 'stun:stun1.l.google.com:19302' }
-                ]}
-            });
+          fileState.chunks.push(data.chunk);
+          fileState.receivedBytes += data.chunk.byteLength;
 
-            peer.on('open', (id) => {
-                myPeerIdInput.value = id;
-                setNetworkStatus('connected', 'Online & Ready');
-            });
+          const progress = (fileState.receivedBytes / fileState.meta.size) * 100;
+          const elapsedSec = (performance.now() - fileState.startTime) / 1000;
+          const speed = elapsedSec > 0 ? (fileState.receivedBytes / (1024 * 1024)) / elapsedSec : 0;
 
-            peer.on('connection', (conn) => {
-                setupConnectionHandlers(conn);
-            });
-
-            peer.on('disconnected', () => {
-                setNetworkStatus('connecting', 'Reconnecting...');
-                peer.reconnect();
-            });
-
-            peer.on('error', (err) => {
-                console.error("PeerJS Error:", err);
-                const errorMsg = err.type === 'server-error' ? 'Server Overloaded' : 'Network Error';
-                setNetworkStatus('error', errorMsg);
-                
-                // Auto-restart on fatal server errors
-                if (err.type === 'unavailable-id' || err.type === 'server-error' || err.type === 'network') {
-                    setTimeout(() => {
-                        if (!peer || peer.destroyed || peer.disconnected) {
-                           peer.destroy();
-                           initPeer();
-                        }
-                    }, 5000);
-                }
-            });
+          updateTransferUiProgress(data.fileId, progress, fileState.receivedBytes, speed);
+          return;
         }
 
-        // Initiate connection to remote peer
-        function connectToPeer() {
-            const targetId = targetPeerIdInput.value.trim();
-            if (!targetId || targetId === peer.id) return;
-            
-            connectBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Connecting...';
-            connectBtn.disabled = true;
+        // 5. File Transfer Complete
+        if (data.type === 'FILE_END') {
+          const fileState = incomingFileBuffers.get(data.fileId);
+          if (!fileState) return;
 
-            const conn = peer.connect(targetId, { reliable: true });
-            setupConnectionHandlers(conn);
+          const blob = new Blob(fileState.chunks, { type: fileState.meta.mime || 'application/octet-stream' });
+          incomingFileBuffers.delete(data.fileId);
+
+          completeTransferUi(data.fileId, true);
+          saveReceivedFile(blob, fileState.meta.name);
+          addHistoryItem(fileState.meta.name, fileState.meta.size, conn.peer, 'download');
         }
+      });
 
-        // Handle Connection Events
-        function setupConnectionHandlers(conn) {
-            conn.on('open', () => {
-                connections[conn.peer] = conn;
-                updateUIForConnection(conn.peer);
-                
-                // Reset connect button
-                connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
-                connectBtn.disabled = false;
-                targetPeerIdInput.value = '';
-            });
+      conn.on('close', () => {
+        activeConnections.delete(conn.peer);
+        renderConnectedPeers();
+        updateStatusBadge('ready', 'جاهز للاتصال والتبادل');
+      });
 
-            conn.on('data', (data) => {
-                handleIncomingData(conn.peer, data);
-            });
+      conn.on('error', (err) => {
+        console.error('Connection error:', err);
+        activeConnections.delete(conn.peer);
+        renderConnectedPeers();
+      });
+    }
 
-            conn.on('close', () => {
-                delete connections[conn.peer];
-                updateUIForDisconnect(conn.peer);
-            });
+    async function handleIncomingHandshakeReq(conn, payload) {
+      const verifyResult = TofuManager.verify(payload.peerId, payload.fingerprint);
 
-            conn.on('error', (err) => {
-                console.error("Connection error:", err);
-                connectBtn.innerHTML = '<i class="fa-solid fa-plug"></i> Connect';
-                connectBtn.disabled = false;
-            });
-        }
-
-        function updateUIForConnection(peerId) {
-            connectedPeersPanel.classList.remove('hidden');
-            if(!document.getElementById(`peer-${peerId}`)) {
-                const li = document.createElement('li');
-                li.id = `peer-${peerId}`;
-                li.className = "flex items-center justify-between bg-black/30 p-2 rounded border border-gray-700";
-                li.innerHTML = `
-                    <span class="font-mono text-sm text-green-300 truncate"><i class="fa-solid fa-link mr-2"></i>${peerId}</span>
-                    <span class="text-xs bg-green-900 text-green-300 px-2 py-1 rounded">Connected</span>
-                `;
-                connectedPeersList.appendChild(li);
-            }
-
-            // Enable file input
-            fileInput.disabled = false;
-            fileInputLabel.className = "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-purple-500 rounded-lg cursor-pointer bg-purple-900/20 text-purple-300 hover:bg-purple-900/40 transition-colors";
-            fileInputLabel.innerHTML = `
-                <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
-                <span class="text-sm font-semibold">Click to select file for transfer</span>
-                <span class="text-xs text-gray-400 mt-1">Sends to all connected peers</span>
-            `;
-        }
-
-        function updateUIForDisconnect(peerId) {
-            const el = document.getElementById(`peer-${peerId}`);
-            if(el) el.remove();
-            
-            if(Object.keys(connections).length === 0) {
-                connectedPeersPanel.classList.add('hidden');
-                fileInput.disabled = true;
-                fileInputLabel.className = "flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-gray-600 rounded-lg cursor-not-allowed bg-black/20 text-gray-500 transition-colors";
-                fileInputLabel.innerHTML = `
-                    <i class="fa-solid fa-cloud-arrow-up text-3xl mb-2"></i>
-                    <span class="text-sm font-semibold">Connect to a peer first to send files</span>
-                `;
-            }
-        }
-
-        // ================== FILE TRANSFER PROTOCOL ==================
-
-        // 1. Sending
-        async function handleFileSelect(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-            
-            if(Object.keys(connections).length === 0) {
-                console.warn("No active connections.");
-                fileInput.value = '';
-                return;
-            }
-
-            const fileId = generateFileId();
-            
-            // Create UI for sending
-            createTransferUI(fileId, file.name, file.size, 'Sending', 'up');
-
-            for (const peerId in connections) {
-                const conn = connections[peerId];
-                sendFile(conn, file, fileId);
-            }
-            
-            fileInput.value = ''; // Reset input
-        }
-
-        async function sendFile(conn, file, fileId) {
-            const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
-            let offset = 0;
-            
-            // Send Header
+      if (verifyResult.status === 'TRUSTED') {
+        // Automatically accept known trusted peer
+        activeConnections.set(conn.peer, conn);
+        renderConnectedPeers();
+        conn.send({
+          type: 'HANDSHAKE_RES',
+          accepted: true,
+          peerId: myId,
+          fingerprint: myFingerprint
+        });
+      } else if (verifyResult.status === 'NEW') {
+        // Prompt User via Modal
+        showTofuModal(payload.peerId, payload.fingerprint, false, (accepted) => {
+          if (accepted) {
+            TofuManager.savePeer(payload.peerId, payload.fingerprint);
+            activeConnections.set(conn.peer, conn);
+            renderConnectedPeers();
             conn.send({
-                type: 'header',
-                fileId: fileId,
-                name: file.name,
-                size: file.size,
-                mime: file.type,
-                totalChunks: totalChunks
+              type: 'HANDSHAKE_RES',
+              accepted: true,
+              peerId: myId,
+              fingerprint: myFingerprint
             });
+          } else {
+            conn.send({ type: 'HANDSHAKE_RES', accepted: false });
+            conn.close();
+          }
+        });
+      } else if (verifyResult.status === 'MISMATCH') {
+        // Warning: Host Key Changed!
+        showTofuModal(payload.peerId, payload.fingerprint, true, (accepted) => {
+          if (accepted) {
+            TofuManager.savePeer(payload.peerId, payload.fingerprint);
+            activeConnections.set(conn.peer, conn);
+            renderConnectedPeers();
+            conn.send({
+              type: 'HANDSHAKE_RES',
+              accepted: true,
+              peerId: myId,
+              fingerprint: myFingerprint
+            });
+          } else {
+            conn.send({ type: 'HANDSHAKE_RES', accepted: false });
+            conn.close();
+          }
+        });
+      }
+    }
 
-            const startTime = Date.now();
-            let lastUpdate = startTime;
+    function handleIncomingHandshakeRes(conn, payload) {
+      if (!payload.accepted) {
+        alert(`تم رفض الاقتران من قِبل الطرف الآخر (${conn.peer})`);
+        conn.close();
+        return;
+      }
 
-            for (let i = 0; i < totalChunks; i++) {
-                const chunk = file.slice(offset, offset + CHUNK_SIZE);
-                const buffer = await chunk.arrayBuffer();
-                
-                conn.send({
-                    type: 'chunk',
-                    fileId: fileId,
-                    index: i,
-                    data: buffer
-                });
-                
-                offset += CHUNK_SIZE;
+      // Verify the other end as well
+      const verifyResult = TofuManager.verify(payload.peerId, payload.fingerprint);
+      if (verifyResult.status === 'TRUSTED') {
+        activeConnections.set(conn.peer, conn);
+        renderConnectedPeers();
+        updateStatusBadge('ready', `متصل مع: ${conn.peer}`);
+      } else {
+        showTofuModal(payload.peerId, payload.fingerprint, verifyResult.status === 'MISMATCH', (accepted) => {
+          if (accepted) {
+            TofuManager.savePeer(payload.peerId, payload.fingerprint);
+            activeConnections.set(conn.peer, conn);
+            renderConnectedPeers();
+            updateStatusBadge('ready', `متصل مع: ${conn.peer}`);
+          } else {
+            conn.close();
+          }
+        });
+      }
+    }
 
-                // Update UI Progress smoothly
-                const now = Date.now();
-                if (now - lastUpdate > 100 || i === totalChunks - 1) {
-                    const speed = (offset / (1024 * 1024)) / ((now - startTime) / 1000);
-                    updateTransferUI(fileId, offset, file.size, speed);
-                    lastUpdate = now;
-                }
-                
-                // Small sleep to prevent overwhelming WebRTC buffer
-                if (i % 10 === 0) await new Promise(r => setTimeout(r, 10)); 
-            }
+    function showTofuModal(peerId, fingerprint, isMismatch, callback) {
+      pendingTofuDecision = callback;
+      const modal = document.getElementById('tofuModal');
+      document.getElementById('modalPeerId').innerText = peerId;
+      document.getElementById('modalFingerprint').innerText = fingerprint;
 
-            // Send EOF
-            conn.send({ type: 'eof', fileId: fileId });
-            completeTransferUI(fileId, true);
+      const warningText = document.getElementById('modalWarningText');
+      if (isMismatch) {
+        warningText.innerHTML = `<span class="text-red-400 font-bold">⚠️ تحذير أمني خطير:</span> بصمة هذا الجهاز تغيرت عن البصمة المسجلة مسبقاً! قد تكون هناك محاولة انتحال أو قام الطرف الآخر بمسح بياناته.`;
+      } else {
+        warningText.innerText = `هل تثق في هذا الجهاز وتقبل تبادل الملفات معه؟ سيتم تسجيل بصمته للتحقق منها تلقائياً في كل مرة.`;
+      }
+
+      modal.classList.remove('hidden');
+    }
+
+    function renderConnectedPeers() {
+      const container = document.getElementById('connectedPeersList');
+      const count = document.getElementById('connectedCount');
+      count.innerText = activeConnections.size;
+
+      if (activeConnections.size === 0) {
+        container.innerHTML = `
+          <div class="text-center py-4 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            لا يوجد أجهزة متصلة بعد
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = Array.from(activeConnections.keys()).map(id => `
+        <div class="bg-slate-950/80 border border-emerald-900/60 rounded-xl p-2.5 flex items-center justify-between text-xs">
+          <div class="flex items-center gap-2 truncate">
+            <span class="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
+            <span class="mono font-bold text-slate-200 truncate">${id}</span>
+          </div>
+          <button onclick="disconnectPeer('${id}')" class="px-2 py-1 bg-slate-800 hover:bg-red-900/40 text-red-400 rounded-lg text-[11px] transition">
+            قطع
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function disconnectPeer(peerId) {
+      if (activeConnections.has(peerId)) {
+        activeConnections.get(peerId).close();
+        activeConnections.delete(peerId);
+        renderConnectedPeers();
+      }
+    }
+
+    // ==========================================
+    // Multi-File Transfer Pipeline
+    // ==========================================
+    async function startSendingFiles() {
+      if (selectedFilesToSend.length === 0) return;
+      if (activeConnections.size === 0) {
+        alert('يجب الاتصال بجهاز آخر أولاً قبل إرسال الملفات!');
+        return;
+      }
+
+      const files = [...selectedFilesToSend];
+      selectedFilesToSend = [];
+      renderSendQueue();
+
+      for (const file of files) {
+        for (const [targetPeerId, conn] of activeConnections) {
+          await sendSingleFileOverConn(file, conn);
+        }
+      }
+    }
+
+    async function sendSingleFileOverConn(file, conn) {
+      const fileId = 'tx-' + Math.random().toString(36).substring(2, 9);
+      const totalBytes = file.size;
+
+      createTransferUiRow({
+        id: fileId,
+        name: file.name,
+        totalBytes: totalBytes,
+        direction: 'upload',
+        peer: conn.peer
+      });
+
+      // 1. Send Start Header
+      conn.send({
+        type: 'FILE_START',
+        fileId: fileId,
+        name: file.name,
+        size: totalBytes,
+        mime: file.type
+      });
+
+      let offset = 0;
+      const startTime = performance.now();
+
+      while (offset < totalBytes) {
+        // Safe buffer check for WebRTC DataChannel
+        if (conn.dataChannel.bufferedAmount > 8 * 1024 * 1024) {
+          await new Promise(r => setTimeout(r, 50));
         }
 
-        // 2. Receiving
-        function handleIncomingData(peerId, msg) {
-            if (msg.type === 'header') {
-                activeTransfers[msg.fileId] = {
-                    name: msg.name,
-                    size: msg.size,
-                    mime: msg.mime,
-                    totalChunks: msg.totalChunks,
-                    receivedChunks: 0,
-                    buffers: [],
-                    startTime: Date.now(),
-                    lastUpdate: Date.now()
-                };
-                
-                if(transferContainer.innerText.includes("No active")) transferContainer.innerHTML = '';
-                createTransferUI(msg.fileId, msg.name, msg.size, `Receiving from ${peerId}`, 'down');
-            } 
-            else if (msg.type === 'chunk') {
-                const transfer = activeTransfers[msg.fileId];
-                if (!transfer) return;
+        const slice = file.slice(offset, offset + CHUNK_SIZE);
+        const arrayBuffer = await slice.arrayBuffer();
 
-                transfer.buffers.push(msg.data);
-                transfer.receivedChunks++;
-                
-                const bytesReceived = transfer.receivedChunks * CHUNK_SIZE;
-                const now = Date.now();
-                
-                if (now - transfer.lastUpdate > 100 || transfer.receivedChunks === transfer.totalChunks) {
-                    const speed = (bytesReceived / (1024 * 1024)) / ((now - transfer.startTime) / 1000);
-                    updateTransferUI(msg.fileId, Math.min(bytesReceived, transfer.size), transfer.size, speed);
-                    transfer.lastUpdate = now;
-                }
-            }
-            else if (msg.type === 'eof') {
-                const transfer = activeTransfers[msg.fileId];
-                if (!transfer) return;
+        conn.send({
+          type: 'FILE_CHUNK',
+          fileId: fileId,
+          chunk: arrayBuffer
+        });
 
-                completeTransferUI(msg.fileId, false, transfer);
-            }
+        offset += arrayBuffer.byteLength;
+        const progress = (offset / totalBytes) * 100;
+        const elapsedSec = (performance.now() - startTime) / 1000;
+        const speed = elapsedSec > 0 ? (offset / (1024 * 1024)) / elapsedSec : 0;
+
+        updateTransferUiProgress(fileId, progress, offset, speed);
+      }
+
+      // 2. Send End Header
+      conn.send({
+        type: 'FILE_END',
+        fileId: fileId
+      });
+
+      completeTransferUi(fileId, true);
+      addHistoryItem(file.name, totalBytes, conn.peer, 'upload');
+    }
+
+    // ==========================================
+    // Save Received File (Directory Picker / Fallback)
+    // ==========================================
+    async function saveReceivedFile(blob, fileName) {
+      const promptSave = document.getElementById('promptSaveDir').checked;
+
+      // Method 1: File System Access API (Allows choosing exact directory/path)
+      if (promptSave && 'showSaveFilePicker' in window) {
+        try {
+          const handle = await window.showSaveFilePicker({
+            suggestedName: fileName,
+            types: [{
+              description: 'All Files',
+              accept: { '*/*': [] }
+            }]
+          });
+          const writable = await handle.createWritable();
+          await writable.write(blob);
+          await writable.close();
+          return;
+        } catch (err) {
+          // If user cancels the picker, fallback or abort safely
+          if (err.name === 'AbortError') return;
+          console.warn('showSaveFilePicker failed, falling back to direct download:', err);
         }
+      }
 
-        // ================== UI FOR TRANSFERS ==================
+      // Method 2: Standard Anchor Trigger (Downloads directory)
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => {
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      }, 1000);
+    }
 
-        function createTransferUI(id, filename, size, contextText, direction) {
-            if(transferContainer.innerText.includes("No active")) transferContainer.innerHTML = '';
-            
-            const icon = direction === 'up' ? 'fa-arrow-up text-orange-400' : 'fa-arrow-down text-teal-400';
-            
-            const div = document.createElement('div');
-            div.id = `transfer-${id}`;
-            div.className = "bg-black/30 p-4 rounded-lg border border-gray-700 relative overflow-hidden";
-            div.innerHTML = `
-                <div class="flex justify-between items-start mb-2 relative z-10">
-                    <div class="truncate max-w-[70%]">
-                        <span class="font-bold block truncate">${filename}</span>
-                        <span class="text-xs text-gray-400"><i class="fa-solid ${icon} mr-1"></i> ${contextText}</span>
-                    </div>
-                    <div class="text-right">
-                        <span class="text-xs font-mono text-purple-300 block" id="progressText-${id}">0%</span>
-                        <span class="text-xs text-gray-500" id="speedText-${id}">0 MB/s</span>
-                    </div>
-                </div>
-                <!-- Progress Bar -->
-                <div class="w-full bg-gray-800 rounded-full h-1.5 mb-1 relative z-10">
-                    <div class="bg-purple-600 h-1.5 rounded-full transition-all duration-100" style="width: 0%" id="progressBar-${id}"></div>
-                </div>
-                <div class="text-xs text-gray-400 text-right w-full" id="bytesText-${id}">0 / ${formatBytes(size)}</div>
-                
-                <!-- Action Area (hidden until complete) -->
-                <div id="actionArea-${id}" class="mt-3 hidden relative z-10"></div>
-            `;
-            transferContainer.prepend(div);
+    // ==========================================
+    // UI Helpers: Transfer Progress & History
+    // ==========================================
+    function createTransferUiRow({ id, name, totalBytes, direction, peer }) {
+      const list = document.getElementById('transfersList');
+      const empty = document.getElementById('emptyTransfers');
+      if (empty) empty.classList.add('hidden');
+
+      const isUpload = direction === 'upload';
+      const icon = isUpload ? 'fa-arrow-up text-purple-400' : 'fa-arrow-down text-emerald-400';
+      const dirText = isUpload ? `إرسال إلى: ${peer}` : `استقبال من: ${peer}`;
+
+      const row = document.createElement('div');
+      row.id = `transfer-${id}`;
+      row.className = 'bg-slate-950 border border-slate-800 rounded-xl p-3 space-y-2';
+      row.innerHTML = `
+        <div class="flex items-center justify-between text-xs">
+          <div class="flex items-center gap-2 truncate flex-1 pl-2">
+            <i class="fa-solid ${icon}"></i>
+            <span class="font-bold text-slate-200 truncate">${name}</span>
+            <span class="text-slate-500">(${dirText})</span>
+          </div>
+          <div class="mono text-slate-400 font-medium">
+            <span id="speed-${id}">0.0 MB/s</span>
+          </div>
+        </div>
+        <div class="w-full bg-slate-900 rounded-full h-2 overflow-hidden">
+          <div id="bar-${id}" class="bg-gradient-to-r from-purple-500 to-emerald-400 h-2 rounded-full transition-all duration-100" style="width: 0%"></div>
+        </div>
+        <div class="flex justify-between text-[11px] text-slate-500 mono">
+          <span id="bytes-${id}">0 B / ${formatBytes(totalBytes)}</span>
+          <span id="percent-${id}">0%</span>
+        </div>
+      `;
+      list.prepend(row);
+    }
+
+    function updateTransferUiProgress(id, percent, currentBytes, speedMbS) {
+      const bar = document.getElementById(`bar-${id}`);
+      const speed = document.getElementById(`speed-${id}`);
+      const bytes = document.getElementById(`bytes-${id}`);
+      const pct = document.getElementById(`percent-${id}`);
+
+      if (bar) bar.style.width = `${Math.min(percent, 100)}%`;
+      if (speed) speed.innerText = `${speedMbS.toFixed(1)} MB/s`;
+      if (pct) pct.innerText = `${Math.round(percent)}%`;
+      if (bytes) {
+        const parts = bytes.innerText.split('/');
+        bytes.innerText = `${formatBytes(currentBytes)} / ${parts[1] || ''}`;
+      }
+    }
+
+    function completeTransferUi(id, success) {
+      const row = document.getElementById(`transfer-${id}`);
+      if (!row) return;
+
+      setTimeout(() => {
+        row.style.opacity = '0.5';
+        const speed = document.getElementById(`speed-${id}`);
+        if (speed) speed.innerText = success ? 'مكتمل ✅' : 'فشل ❌';
+      }, 500);
+    }
+
+    function addHistoryItem(name, size, peer, direction) {
+      const list = document.getElementById('historyList');
+      const empty = document.getElementById('emptyHistory');
+      if (empty) empty.classList.add('hidden');
+
+      const isUpload = direction === 'upload';
+      const item = document.createElement('div');
+      item.className = 'bg-slate-950/70 border border-slate-800/80 rounded-xl p-2.5 flex items-center justify-between text-xs';
+      item.innerHTML = `
+        <div class="flex items-center gap-2 truncate flex-1">
+          <i class="fa-solid ${isUpload ? 'fa-upload text-purple-400' : 'fa-download text-emerald-400'}"></i>
+          <span class="font-medium text-slate-200 truncate">${name}</span>
+          <span class="text-slate-500">(${formatBytes(size)})</span>
+        </div>
+        <div class="text-[11px] text-slate-500 mono flex items-center gap-2">
+          <span>${peer}</span>
+          <span class="text-slate-600">•</span>
+          <span>${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+        </div>
+      `;
+      list.prepend(item);
+    }
+
+    // ==========================================
+    // Event Listeners & Initialization
+    // ==========================================
+    document.addEventListener('DOMContentLoaded', () => {
+      // Restore prompt save config
+      const savedPrompt = localStorage.getItem(PROMPT_SAVE_STORAGE_KEY);
+      if (savedPrompt !== null) {
+        document.getElementById('promptSaveDir').checked = (savedPrompt === 'true');
+      }
+
+      document.getElementById('promptSaveDir').addEventListener('change', (e) => {
+        localStorage.setItem(PROMPT_SAVE_STORAGE_KEY, e.target.checked);
+      });
+
+      // Initialize TOFU List
+      renderTofuList();
+
+      // Initialize Peer
+      initPeer();
+
+      // Custom ID Button
+      document.getElementById('btnSetCustomId').addEventListener('click', () => {
+        const val = document.getElementById('myCustomIdInput').value.trim();
+        if (val) {
+          initPeer(val);
         }
+      });
 
-        function updateTransferUI(id, current, total, speed) {
-            const progress = (current / total) * 100;
-            const bar = document.getElementById(`progressBar-${id}`);
-            const pText = document.getElementById(`progressText-${id}`);
-            const sText = document.getElementById(`speedText-${id}`);
-            const bText = document.getElementById(`bytesText-${id}`);
+      // Copy ID Button
+      document.getElementById('btnCopyMyId').addEventListener('click', () => {
+        navigator.clipboard.writeText(myId);
+        alert('تم نسخ المعرّف (Peer ID) إلى الحافظة!');
+      });
 
-            if (bar) bar.style.width = `${progress}%`;
-            if (pText) pText.innerText = `${progress.toFixed(1)}%`;
-            if (sText) sText.innerText = `${speed.toFixed(2)} MB/s`;
-            if (bText) bText.innerText = `${formatBytes(current)} / ${formatBytes(total)}`;
+      // Connect Button
+      document.getElementById('btnConnect').addEventListener('click', () => {
+        const target = document.getElementById('remotePeerIdInput').value.trim();
+        connectToRemotePeer(target);
+      });
+
+      // Clear TOFU
+      document.getElementById('btnClearTofu').addEventListener('click', () => {
+        if (confirm('هل أنت متأكد من مسح جميع الأجهزة الموثوقة؟')) {
+          TofuManager.clearAll();
         }
+      });
 
-        function completeTransferUI(id, isSender, transferData = null) {
-            const pText = document.getElementById(`progressText-${id}`);
-            const sText = document.getElementById(`speedText-${id}`);
-            const bar = document.getElementById(`progressBar-${id}`);
-            const actionArea = document.getElementById(`actionArea-${id}`);
-            const card = document.getElementById(`transfer-${id}`);
+      // Modal Handlers
+      document.getElementById('modalBtnTrust').addEventListener('click', () => {
+        document.getElementById('tofuModal').classList.add('hidden');
+        if (pendingTofuDecision) pendingTofuDecision(true);
+      });
 
-            if (pText) pText.innerText = "100%";
-            if (sText) sText.innerText = "Complete";
-            if (bar) {
-                bar.style.width = "100%";
-                bar.classList.replace('bg-purple-600', 'bg-green-500');
-            }
-            if(card) card.classList.replace('border-gray-700', 'border-green-800');
+      document.getElementById('modalBtnReject').addEventListener('click', () => {
+        document.getElementById('tofuModal').classList.add('hidden');
+        if (pendingTofuDecision) pendingTofuDecision(false);
+      });
 
-            if (actionArea) {
-                actionArea.classList.remove('hidden');
-                
-                if (isSender) {
-                    actionArea.innerHTML = `<span class="text-sm text-green-400"><i class="fa-solid fa-check-circle mr-1"></i> Sent successfully</span>`;
-                } else if (transferData) {
-                    // Receiver: Combine buffers and offer download
-                    const blob = new Blob(transferData.buffers, { type: transferData.mime });
-                    const url = URL.createObjectURL(blob);
-                    
-                    actionArea.innerHTML = `
-                        <a href="${url}" download="${transferData.name}" class="bg-teal-600 hover:bg-teal-500 text-white text-sm py-1.5 px-4 rounded inline-flex items-center gap-2 transition">
-                            <i class="fa-solid fa-floppy-disk"></i> Save File
-                        </a>
-                    `;
-                    
-                    // Cleanup memory after a while if desired, but user needs to click link first.
-                    delete activeTransfers[id];
-                }
-            }
+      // File Selection & Drag-Drop
+      const dropZone = document.getElementById('dropZone');
+      const fileInput = document.getElementById('fileInput');
+
+      dropZone.addEventListener('click', () => fileInput.click());
+      dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropZone.classList.add('border-purple-500', 'bg-slate-900/60');
+      });
+      dropZone.addEventListener('dragleave', () => {
+        dropZone.classList.remove('border-purple-500', 'bg-slate-900/60');
+      });
+      dropZone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropZone.classList.remove('border-purple-500', 'bg-slate-900/60');
+        if (e.dataTransfer.files.length > 0) {
+          handleFilesSelected(Array.from(e.dataTransfer.files));
         }
+      });
 
-        // Start App
-        window.addEventListener('load', initPeer);
+      fileInput.addEventListener('change', () => {
+        if (fileInput.files.length > 0) {
+          handleFilesSelected(Array.from(fileInput.files));
+        }
+      });
 
-    </script>
+      document.getElementById('btnSendFiles').addEventListener('click', startSendingFiles);
+
+      document.getElementById('btnClearHistory').addEventListener('click', () => {
+        document.getElementById('historyList').innerHTML = `
+          <div id="emptyHistory" class="text-center py-6 text-xs text-slate-500 border border-dashed border-slate-800 rounded-xl">
+            لم يكتمل نقل أي ملف بعد
+          </div>`;
+      });
+    });
+
+    function handleFilesSelected(files) {
+      selectedFilesToSend.push(...files);
+      renderSendQueue();
+    }
+
+    function renderSendQueue() {
+      const container = document.getElementById('sendQueueContainer');
+      const list = document.getElementById('sendQueueList');
+      const summary = document.getElementById('sendQueueSummary');
+
+      if (selectedFilesToSend.length === 0) {
+        container.classList.add('hidden');
+        return;
+      }
+
+      container.classList.remove('hidden');
+      const totalSize = selectedFilesToSend.reduce((acc, f) => acc + f.size, 0);
+      summary.innerText = `${selectedFilesToSend.length} ملفات (${formatBytes(totalSize)})`;
+
+      list.innerHTML = selectedFilesToSend.map((f, idx) => `
+        <div class="flex items-center justify-between text-xs bg-slate-950 p-2 rounded-xl border border-slate-800">
+          <span class="truncate flex-1 pl-2 text-slate-300 font-medium">${f.name} <span class="text-slate-500">(${formatBytes(f.size)})</span></span>
+          <button onclick="removeSelectedFile(${idx})" class="text-slate-500 hover:text-red-400 p-1">
+            <i class="fa-solid fa-xmark"></i>
+          </button>
+        </div>
+      `).join('');
+    }
+
+    function removeSelectedFile(index) {
+      selectedFilesToSend.splice(index, 1);
+      renderSendQueue();
+    }
+  </script>
 </body>
 </html>
